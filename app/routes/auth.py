@@ -117,7 +117,7 @@ async def login_for_access_token(
     )
 
     # Criar token de acesso
-    access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": str(user["_id"])},
         expires_delta=access_token_expires
@@ -145,7 +145,7 @@ async def refresh_access_token(
     Returns:
         Novo token de acesso e tipo de token
     """
-    access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": str(current_user.id)},
         expires_delta=access_token_expires

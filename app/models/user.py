@@ -12,12 +12,13 @@ class PyObjectId(str):
 
     @classmethod
     def validate(cls, v):
-        if not isinstance(v, ObjectId):
-            try:
-                ObjectId(str(v))
-            except:
-                raise ValueError("Invalid ObjectId")
+        if not ObjectId.is_valid(v):
+            raise ValueError("Invalid ObjectId")
         return str(v)
+
+    # Nova implementação para gerar ObjectId quando usado como factory
+    def __new__(cls, *args, **kwargs):
+        return str(ObjectId())
 
 
 class User(BaseModel):
@@ -59,7 +60,5 @@ class UserUpdate(BaseModel):
     role: Optional[Literal["player", "dm"]] = None
 
 
-# Add this class which was missing
 class UserInDB(User):
-    """User model as stored in the database"""
     pass
