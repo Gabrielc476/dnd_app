@@ -17,6 +17,14 @@ from app.websocket.event_handlers import (
     handle_spell_event
 )
 from app.models.user import User
+from app.routes import (
+    auth,
+    characters,
+    campaigns,
+    npcs,
+    compendium,
+    combat
+)
 
 # Configurar logging
 logging.basicConfig(
@@ -44,13 +52,13 @@ app.add_middleware(
     allow_headers=settings.ALLOW_HEADERS,
 )
 
-# Importar routers
-from app.routes import auth, characters, campaigns, npcs, compendium
-
 # Incluir routers na aplicação
-app.include_router(auth.router, prefix=settings.API_PREFIX)
-for router in [characters.router, campaigns.router, npcs.router, compendium.router]:
-    app.include_router(router, prefix=settings.API_PREFIX, dependencies=[Depends(get_current_user)])
+app.include_router(auth.router)
+app.include_router(characters.router)
+app.include_router(campaigns.router)
+app.include_router(npcs.router)
+app.include_router(compendium.router)
+app.include_router(combat.router)
 
 # Gerenciadores para WebSockets
 connection_manager = ConnectionManager()
@@ -130,7 +138,7 @@ async def websocket_endpoint(
         await websocket.close(code=1003)  # Unsupported Data
         return
 
-    is_dm = campaign["dm_id"] == str(current_user.id)
+    is_dm = campaign.get("dm_id") == str(current_user.id)
     is_player = str(current_user.id) in campaign.get("players", [])
 
     if not is_dm and not is_player:
@@ -150,7 +158,7 @@ async def websocket_endpoint(
                 continue
 
             # Processar diferentes tipos de mensagens
-            message_type = data["type"]
+            message_type = data.get("type")
 
             # Log para debug
             logger.debug(f"Mensagem recebida ({message_type}): {data}")
@@ -448,8 +456,8 @@ async def release_all_user_locks(user_id: str, lock_manager: LockManager) -> Non
     # Liberar cada lock
     for lock in locks:
         await lock_manager.release_lock(
-            resource_id=lock["resource_id"],
-            resource_type=lock["resource_type"],
+            resource_id=lock.get("resource_id"),
+            resource_type=lock.get("resource_type"),
             user_id=user_id
         )
 
@@ -462,7 +470,7 @@ async def release_all_user_locks(user_id: str, lock_manager: LockManager) -> Non
         session_types = ["combat_session", "initiative"]
         for resource_type in session_types:
             await lock_manager.release_session_lock(
-                campaign_id=str(campaign["_id"]),
+                campaign_id=str(campaign.get("_id")),
                 resource_type=resource_type,
                 user_id=user_id
             )
