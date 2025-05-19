@@ -1,54 +1,57 @@
 # app/config.py
-from pydantic import BaseSettings, AnyHttpUrl
-from typing import List, Optional, Union
+from typing import List
 import os
 from dotenv import load_dotenv
 
 # Carrega as variáveis de ambiente do arquivo .env
 load_dotenv()
 
+# Helper function to parse comma-separated env vars
+def parse_comma_separated_list(value, default=None):
+    if not value:
+        return default or []
+    return [item.strip() for item in value.split(",")]
 
-class Settings(BaseSettings):
+# Simple settings class without Pydantic
+class Settings:
     # Configurações da aplicação
-    APP_NAME: str = "D&D VTT API"
-    API_PREFIX: str = "/api"
-    DEBUG: bool = False
-    VERSION: str = "0.1.0"
+    APP_NAME: str = os.getenv("APP_NAME", "D&D VTT API")
+    API_PREFIX: str = os.getenv("API_PREFIX", "/api")
+    DEBUG: bool = os.getenv("DEBUG", "False").lower() in ("true", "1", "t")
+    VERSION: str = os.getenv("VERSION", "0.1.0")
 
     # Configurações do MongoDB
-    MONGODB_URI: str
-    DB_NAME: str = "dnd_vtt"
+    MONGODB_URI: str = os.getenv("MONGODB_URI", "")
+    DB_NAME: str = os.getenv("DB_NAME", "dnd_vtt")
 
     # Configurações de segurança
-    SECRET_KEY: str
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "")
+    ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 
     # Configurações CORS
-    ALLOW_ORIGINS: List[str] = ["*"]
-    ALLOW_CREDENTIALS: bool = True
-    ALLOW_METHODS: List[str] = ["*"]
-    ALLOW_HEADERS: List[str] = ["*"]
+    ALLOW_ORIGINS: List[str] = parse_comma_separated_list(os.getenv("ALLOW_ORIGINS"), ["*"])
+    ALLOW_CREDENTIALS: bool = os.getenv("ALLOW_CREDENTIALS", "True").lower() in ("true", "1", "t")
+    ALLOW_METHODS: List[str] = parse_comma_separated_list(os.getenv("ALLOW_METHODS"), ["*"])
+    ALLOW_HEADERS: List[str] = parse_comma_separated_list(os.getenv("ALLOW_HEADERS"), ["*"])
 
     # Configurações de WebSocket
-    WS_PING_INTERVAL: int = 30  # segundos
-    WS_HEARTBEAT_TIMEOUT: int = 15  # segundos
+    WS_PING_INTERVAL: int = int(os.getenv("WS_PING_INTERVAL", "30"))
+    WS_HEARTBEAT_TIMEOUT: int = int(os.getenv("WS_HEARTBEAT_TIMEOUT", "15"))
 
     # Configurações de Lock
-    LOCK_DEFAULT_TIMEOUT: int = 30  # segundos
-    LOCK_MAX_TIMEOUT: int = 3600  # 1 hora em segundos
+    LOCK_DEFAULT_TIMEOUT: int = int(os.getenv("LOCK_DEFAULT_TIMEOUT", "30"))
+    LOCK_MAX_TIMEOUT: int = int(os.getenv("LOCK_MAX_TIMEOUT", "3600"))
 
     # Configurações de upload
-    MAX_UPLOAD_SIZE: int = 5242880  # 5MB em bytes
-    ALLOWED_IMAGE_TYPES: List[str] = ["image/jpeg", "image/png", "image/gif", "image/webp"]
+    MAX_UPLOAD_SIZE: int = int(os.getenv("MAX_UPLOAD_SIZE", "5242880"))
+    ALLOWED_IMAGE_TYPES: List[str] = parse_comma_separated_list(
+        os.getenv("ALLOWED_IMAGE_TYPES"),
+        ["image/jpeg", "image/png", "image/gif", "image/webp"]
+    )
 
     # Outras configurações
-    MAX_CONNECTIONS_PER_CAMPAIGN: int = 10
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
+    MAX_CONNECTIONS_PER_CAMPAIGN: int = int(os.getenv("MAX_CONNECTIONS_PER_CAMPAIGN", "10"))
 
 
 # Cria uma instância das configurações
