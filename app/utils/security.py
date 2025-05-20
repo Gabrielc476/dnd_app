@@ -50,34 +50,35 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
 
 
 def decode_access_token(token: str) -> Dict[str, Any]:
-    """
-    Decodifica um token JWT e retorna seus dados.
-
-    Args:
-        token: Token JWT a ser decodificado
-
-    Returns:
-        Dados decodificados do token
-
-    Raises:
-        HTTPException: Se o token for inválido ou expirado
-    """
     try:
+        # Adicionar log para depuração
+        print(f"Tentando decodificar token com SECRET_KEY: {settings.SECRET_KEY[:5]}...")
+
         payload = jwt.decode(
             token,
             settings.SECRET_KEY,
             algorithms=[settings.ALGORITHM]
         )
+        print(f"Token decodificado com sucesso: sub={payload.get('sub')}")
         return payload
     except jwt.ExpiredSignatureError:
+        print("Erro: Token expirado")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token expirado",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    except jwt.InvalidTokenError:
+    except jwt.InvalidTokenError as e:
+        print(f"Erro: Token inválido - {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token inválido",
+            detail=f"Token inválido: {str(e)}",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except Exception as e:
+        print(f"Erro não esperado ao decodificar token: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Erro ao processar token: {str(e)}",
             headers={"WWW-Authenticate": "Bearer"},
         )

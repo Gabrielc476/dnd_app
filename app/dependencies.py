@@ -16,39 +16,55 @@ async def get_current_user(
         token: str = Depends(oauth2_scheme),
         db: AsyncIOMotorDatabase = Depends(get_database)
 ) -> User:
-    """
-    Obtém o usuário atual a partir do token JWT.
+    try:
+        payload = decode_access_token(token)
+        user_id = payload.get("sub")
 
-    Args:
-        token: Token JWT do cabeçalho de autorização
-        db: Conexão com o banco de dados
+        print(f"Procurando usuário com ID: {user_id}")
 
-    Returns:
-        Objeto User correspondente ao token
+        if user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token de acesso inválido - ID não encontrado",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
-    Raises:
-        HTTPException: Se o token for inválido ou o usuário não for encontrado
-    """
-    payload = decode_access_token(token)
-    user_id = payload.get("sub")
+        # Primeira tentativa - usando ObjectId
+        try:
+            user = await db.users.find_one({"_id": ObjectId(user_id)})
+            print(f"Busca com ObjectId: {'sucesso' if user else 'falha'}")
+        except Exception as e:
+            print(f"Erro ao converter para ObjectId: {e}")
+            user = None
 
-    if user_id is None:
+        # Segunda tentativa - usando a string diretamente
+        if user is None:
+            user = await db.users.find_one({"_id": user_id})
+            print(f"Busca com string: {'sucesso' if user else 'falha'}")
+
+        # Terceira tentativa - verificar todos os usuários para debug
+        if user is None:
+            print("Usuário não encontrado. Verificando todos os usuários:")
+            users = await db.users.find().to_list(length=10)
+            print(f"Total de usuários: {len(users)}")
+            for u in users:
+                print(f"ID: {u.get('_id')} - Username: {u.get('username')}")
+
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Usuário não encontrado",
+            )
+
+        return User(**user)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Erro geral em get_current_user: {e}")
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token de acesso inválido",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro interno: {str(e)}",
         )
-
-    user = await db.users.find_one({"_id": ObjectId(user_id)})
-
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Usuário não encontrado",
-        )
-
-    return User(**user)
-
 
 async def get_current_active_user(current_user: User = Depends(get_current_user)) -> User:
     """

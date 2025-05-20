@@ -17,14 +17,7 @@ from app.websocket.event_handlers import (
     handle_spell_event
 )
 from app.models.user import User
-from app.routes import (
-    auth,
-    characters,
-    campaigns,
-    npcs,
-    compendium,
-    combat
-)
+from app.routes import auth, characters, campaigns, npcs, compendium, combat
 
 # Configurar logging
 logging.basicConfig(
@@ -53,12 +46,12 @@ app.add_middleware(
 )
 
 # Incluir routers na aplicação
-app.include_router(auth.router)
-app.include_router(characters.router)
-app.include_router(campaigns.router)
-app.include_router(npcs.router)
-app.include_router(compendium.router)
-app.include_router(combat.router)
+app.include_router(auth)
+app.include_router(characters)
+app.include_router(campaigns)
+app.include_router(npcs)
+app.include_router(compendium)
+app.include_router(combat)
 
 # Gerenciadores para WebSockets
 connection_manager = ConnectionManager()

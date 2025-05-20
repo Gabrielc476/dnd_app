@@ -1,21 +1,8 @@
-# app/routes/__init__.py
-"""
-Routers da API para o sistema D&D VTT.
+from app.routes.auth import router as auth
+from app.routes.characters import router as characters
+from app.routes.campaigns import router as campaigns
+from app.routes.npcs import router as npcs
+from app.routes.compendium import router as compendium
+from app.routes.combat import router as combat  # Certifique-se de que este arquivo existe
 
-Este módulo contém os routers que definem os endpoints da API,
-organizados por domínio da aplicação.
-"""
-
-from app.routes.auth import router as auth_router
-from app.routes.characters import router as characters_router
-from app.routes.campaigns import router as campaigns_router
-from app.routes.npcs import router as npcs_router
-from app.routes.compendium import router as compendium_router
-
-__all__ = [
-    "auth_router",
-    "characters_router",
-    "campaigns_router",
-    "npcs_router",
-    "compendium_router"
-]
+__all__ = ["auth", "characters", "campaigns", "npcs", "compendium", "combat"]

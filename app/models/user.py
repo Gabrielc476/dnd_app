@@ -1,22 +1,56 @@
 # app/models/user.py
 from datetime import datetime
-from typing import Optional, Literal
+from typing import Optional, Literal, Any
 from pydantic import BaseModel, Field, EmailStr
 from bson import ObjectId
+from bson.errors import InvalidId
 
 
 class PyObjectId(str):
+    """
+    Classe para manipular IDs do MongoDB de forma robusta.
+    Aceita string ou ObjectId e fornece validação.
+    """
+
     @classmethod
     def __get_validators__(cls):
         yield cls.validate
 
     @classmethod
     def validate(cls, v):
-        if not ObjectId.is_valid(v):
-            raise ValueError("Invalid ObjectId")
-        return str(v)
+        if v is None:
+            return None
 
-    # Nova implementação para gerar ObjectId quando usado como factory
+        if isinstance(v, ObjectId):
+            return str(v)
+
+        if isinstance(v, str):
+            try:
+                ObjectId(v)
+                return v
+            except (InvalidId, TypeError):
+                raise ValueError("Invalid ObjectId")
+
+        try:
+            return str(ObjectId(str(v)))
+        except (InvalidId, TypeError):
+            raise ValueError("Invalid ObjectId")
+
+    @classmethod
+    def to_object_id(cls, v):
+        """Converte para ObjectId se possível, ou retorna None."""
+        if v is None:
+            return None
+
+        if isinstance(v, ObjectId):
+            return v
+
+        try:
+            return ObjectId(str(v))
+        except (InvalidId, TypeError):
+            return None
+
+    # Para uso como factory
     def __new__(cls, *args, **kwargs):
         return str(ObjectId())
 
