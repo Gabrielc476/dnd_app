@@ -30,6 +30,16 @@ class LockManager:
         self.db = db
         self.locks_collection = db.locks
 
+    def _format_id(self, item):
+        """Formata o ID de um item para string."""
+        if item and "_id" in item:
+            item["_id"] = str(item["_id"])
+        return item
+
+    def _format_id_list(self, items):
+        """Formata os IDs de uma lista de itens para string."""
+        return [self._format_id(item) for item in items] if items else []
+
     async def acquire_lock(
             self,
             resource_id: str,
@@ -71,9 +81,9 @@ class LockManager:
 
         if existing_lock:
             # Se o lock atual pertence ao usuário, estender
-            if existing_lock["locked_by"] == user_id:
+            if str(existing_lock.get("locked_by")) == str(user_id):
                 await self.locks_collection.update_one(
-                    {"_id": existing_lock["_id"]},
+                    existing_lock["_id"],
                     {"$set": {"expires_at": expires_at}}
                 )
                 logger.debug(f"Lock estendido: {resource_type}:{resource_id} por {user_id}")
@@ -88,9 +98,9 @@ class LockManager:
 
         # Criar um novo lock
         await self.locks_collection.insert_one({
-            "resource_id": resource_id,
+            "resource_id": str(resource_id),
             "resource_type": resource_type,
-            "locked_by": user_id,
+            "locked_by": str(user_id),
             "timestamp": now,
             "expires_at": expires_at
         })
@@ -116,9 +126,9 @@ class LockManager:
             True se o lock foi liberado, False caso contrário
         """
         result = await self.locks_collection.delete_one({
-            "resource_id": resource_id,
+            "resource_id": str(resource_id),
             "resource_type": resource_type,
-            "locked_by": user_id
+            "locked_by": str(user_id)
         })
 
         success = result.deleted_count > 0
@@ -159,9 +169,9 @@ class LockManager:
 
         result = await self.locks_collection.update_one(
             {
-                "resource_id": resource_id,
+                "resource_id": str(resource_id),
                 "resource_type": resource_type,
-                "locked_by": user_id
+                "locked_by": str(user_id)
             },
             {"$set": {"expires_at": expires_at}}
         )
@@ -213,10 +223,13 @@ class LockManager:
             query["resource_type"] = resource_type
 
         if user_id:
-            query["locked_by"] = user_id
+            query["locked_by"] = str(user_id)
 
         cursor = self.locks_collection.find(query)
-        return await cursor.to_list(length=100)  # Limitar a 100 locks por consulta
+        locks = await cursor.to_list(length=100)  # Limitar a 100 locks por consulta
+
+        # Formatar IDs para string antes de retornar
+        return self._format_id_list(locks)
 
     async def get_user_locks(self, user_id: str) -> List[Dict[str, Any]]:
         """
@@ -249,10 +262,10 @@ class LockManager:
         """
         now = datetime.utcnow()
         lock = await self.locks_collection.find_one({
-            "resource_id": resource_id,
+            "resource_id": str(resource_id),
             "resource_type": resource_type,
             "expires_at": {"$gt": now},
-            "locked_by": {"$ne": user_id}
+            "locked_by": {"$ne": str(user_id)}
         })
 
         return lock is not None
@@ -274,12 +287,12 @@ class LockManager:
         """
         now = datetime.utcnow()
         lock = await self.locks_collection.find_one({
-            "resource_id": resource_id,
+            "resource_id": str(resource_id),
             "resource_type": resource_type,
             "expires_at": {"$gt": now}
         })
 
-        return lock["locked_by"] if lock else None
+        return str(lock.get("locked_by")) if lock else None
 
     async def create_session_lock(
             self,
@@ -314,22 +327,22 @@ class LockManager:
 
         # Verificar se já existe um lock de sessão
         existing_lock = await self.db.session_locks.find_one({
-            "campaign_id": campaign_id,
+            "campaign_id": str(campaign_id),
             "resource_type": resource_type,
             "expires_at": {"$gt": now}
         })
 
         if existing_lock:
             # Se o lock atual pertence ao usuário, estender
-            if existing_lock["locked_by"] == user_id:
+            if str(existing_lock.get("locked_by")) == str(user_id):
                 update_data = {"expires_at": expires_at}
 
                 # Atualizar player_turn se fornecido
                 if player_turn is not None:
-                    update_data["player_turn"] = player_turn
+                    update_data["player_turn"] = str(player_turn)
 
                 await self.db.session_locks.update_one(
-                    {"_id": existing_lock["_id"]},
+                    existing_lock["_id"],
                     {"$set": update_data}
                 )
 
@@ -345,15 +358,15 @@ class LockManager:
 
         # Criar um novo lock de sessão
         session_lock = {
-            "campaign_id": campaign_id,
+            "campaign_id": str(campaign_id),
             "resource_type": resource_type,
-            "locked_by": user_id,
+            "locked_by": str(user_id),
             "timestamp": now,
             "expires_at": expires_at
         }
 
         if player_turn is not None:
-            session_lock["player_turn"] = player_turn
+            session_lock["player_turn"] = str(player_turn)
 
         await self.db.session_locks.insert_one(session_lock)
 
@@ -378,9 +391,9 @@ class LockManager:
             True se o lock foi liberado, False caso contrário
         """
         result = await self.db.session_locks.delete_one({
-            "campaign_id": campaign_id,
+            "campaign_id": str(campaign_id),
             "resource_type": resource_type,
-            "locked_by": user_id
+            "locked_by": str(user_id)
         })
 
         success = result.deleted_count > 0
@@ -412,11 +425,11 @@ class LockManager:
         """
         result = await self.db.session_locks.update_one(
             {
-                "campaign_id": campaign_id,
+                "campaign_id": str(campaign_id),
                 "resource_type": resource_type,
-                "locked_by": user_id
+                "locked_by": str(user_id)
             },
-            {"$set": {"player_turn": player_turn}}
+            {"$set": {"player_turn": str(player_turn)}}
         )
 
         success = result.modified_count > 0
@@ -450,9 +463,9 @@ class LockManager:
         """
         now = datetime.utcnow()
         lock = await self.db.session_locks.find_one({
-            "campaign_id": campaign_id,
+            "campaign_id": str(campaign_id),
             "resource_type": resource_type,
             "expires_at": {"$gt": now}
         })
 
-        return lock.get("player_turn") if lock else None
+        return str(lock.get("player_turn")) if lock and lock.get("player_turn") else None

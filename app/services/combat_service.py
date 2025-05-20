@@ -32,6 +32,16 @@ class CombatService:
         """
         self.db = db
 
+    def _format_id(self, item):
+        """Formata o ID de um item para string."""
+        if item and "_id" in item:
+            item["_id"] = str(item["_id"])
+        return item
+
+    def _format_id_list(self, items):
+        """Formata os IDs de uma lista de itens para string."""
+        return [self._format_id(item) for item in items] if items else []
+
     async def create_combat(self, combat_data: CombatCreateSchema, user_id: str) -> Dict[str, Any]:
         """
         Inicia um novo combate.
@@ -47,7 +57,7 @@ class CombatService:
             HTTPException: Se a campanha não existir, o usuário não for o DM ou já houver um combate ativo
         """
         # Verificar se a campanha existe
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(combat_data.campaign_id)})
+        campaign = await self.db.campaigns.find_one(combat_data.campaign_id)
 
         if not campaign:
             raise HTTPException(
@@ -56,7 +66,7 @@ class CombatService:
             )
 
         # Verificar se o usuário é o DM da campanha
-        if campaign.get("dm_id") != user_id:
+        if str(campaign.get("dm_id")) != str(user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Apenas o DM pode iniciar combate nesta campanha"
@@ -79,7 +89,7 @@ class CombatService:
         if encounter_id:
             encounter_found = False
             for encounter in campaign.get("encounters", []):
-                if encounter.get("id") == encounter_id:
+                if str(encounter.get("id")) == str(encounter_id):
                     encounter_found = True
                     break
 
@@ -91,15 +101,15 @@ class CombatService:
 
             # Atualizar o encontro ativo na campanha
             await self.db.campaigns.update_one(
-                {"_id": ObjectId(combat_data.campaign_id)},
+                combat_data.campaign_id,
                 {"$set": {"active_encounter": encounter_id}}
             )
 
         # Preparar dados do combate
         now = datetime.utcnow()
         combat_dict = {
-            "campaign_id": combat_data.campaign_id,
-            "encounter_id": encounter_id,
+            "campaign_id": str(combat_data.campaign_id),
+            "encounter_id": str(encounter_id) if encounter_id else None,
             "status": "active",
             "round": 1,
             "initiative_order": [],
@@ -114,9 +124,10 @@ class CombatService:
         result = await self.db.combats.insert_one(combat_dict)
 
         # Recuperar o combate criado
-        created_combat = await self.db.combats.find_one({"_id": result.inserted_id})
+        created_combat = await self.db.combats.find_one(result.inserted_id)
 
-        return created_combat
+        # Formatar ID para string antes de retornar
+        return self._format_id(created_combat)
 
     async def get_combat(self, combat_id: str, user_id: str) -> Dict[str, Any]:
         """
@@ -133,7 +144,7 @@ class CombatService:
             HTTPException: Se o combate não for encontrado ou o usuário não tiver acesso
         """
         # Verificar se o combate existe
-        combat = await self.db.combats.find_one({"_id": ObjectId(combat_id)})
+        combat = await self.db.combats.find_one(combat_id)
 
         if not combat:
             raise HTTPException(
@@ -144,7 +155,8 @@ class CombatService:
         # Verificar se o usuário tem acesso ao combate
         await self._check_combat_access(combat, user_id)
 
-        return combat
+        # Formatar ID para string antes de retornar
+        return self._format_id(combat)
 
     async def get_active_combat(self, campaign_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -161,7 +173,7 @@ class CombatService:
             HTTPException: Se a campanha não for encontrada ou o usuário não tiver acesso
         """
         # Verificar se a campanha existe
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        campaign = await self.db.campaigns.find_one(campaign_id)
 
         if not campaign:
             raise HTTPException(
@@ -170,8 +182,8 @@ class CombatService:
             )
 
         # Verificar se o usuário está na campanha
-        is_dm = campaign.get("dm_id") == user_id
-        is_player = user_id in campaign.get("players", [])
+        is_dm = str(campaign.get("dm_id")) == str(user_id)
+        is_player = str(user_id) in [str(p) for p in campaign.get("players", [])]
 
         if not (is_dm or is_player):
             raise HTTPException(
@@ -185,7 +197,8 @@ class CombatService:
             "status": "active"
         })
 
-        return active_combat
+        # Formatar ID para string se houver combate ativo
+        return self._format_id(active_combat) if active_combat else None
 
     async def update_combat(
             self,
@@ -208,7 +221,7 @@ class CombatService:
             HTTPException: Se o combate não for encontrado ou o usuário não for o DM
         """
         # Verificar se o combate existe
-        combat = await self.db.combats.find_one({"_id": ObjectId(combat_id)})
+        combat = await self.db.combats.find_one(combat_id)
 
         if not combat:
             raise HTTPException(
@@ -218,9 +231,9 @@ class CombatService:
 
         # Verificar se o usuário é o DM da campanha
         campaign_id = combat.get("campaign_id")
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        campaign = await self.db.campaigns.find_one(campaign_id)
 
-        if not campaign or campaign.get("dm_id") != user_id:
+        if not campaign or str(campaign.get("dm_id")) != str(user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Apenas o DM pode atualizar este combate"
@@ -239,20 +252,21 @@ class CombatService:
             # Remover o encontro ativo se este combate estava usando um encontro
             if combat.get("encounter_id"):
                 await self.db.campaigns.update_one(
-                    {"_id": ObjectId(campaign_id)},
+                    campaign_id,
                     {"$unset": {"active_encounter": ""}}
                 )
 
         # Atualizar o combate
         await self.db.combats.update_one(
-            {"_id": ObjectId(combat_id)},
+            combat_id,
             {"$set": update_data}
         )
 
         # Recuperar o combate atualizado
-        updated_combat = await self.db.combats.find_one({"_id": ObjectId(combat_id)})
+        updated_combat = await self.db.combats.find_one(combat_id)
 
-        return updated_combat
+        # Formatar ID para string antes de retornar
+        return self._format_id(updated_combat)
 
     async def end_combat(self, combat_id: str, user_id: str) -> Dict[str, Any]:
         """
@@ -295,7 +309,7 @@ class CombatService:
         """
         # Verificar se o combate existe e está ativo
         combat = await self.db.combats.find_one({
-            "_id": ObjectId(combat_id),
+            "_id": combat_id,
             "status": "active"
         })
 
@@ -313,7 +327,7 @@ class CombatService:
 
         # Verificar se a entidade já está na ordem de iniciativa
         for entry in combat.get("initiative_order", []):
-            if entry.get("id") == entity_id and entry.get("type") == entity_type:
+            if str(entry.get("id")) == str(entity_id) and entry.get("type") == entity_type:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Esta entidade já está na ordem de iniciativa"
@@ -321,7 +335,7 @@ class CombatService:
 
         # Verificar se a entidade existe e se o usuário tem permissão
         if entity_type == "character":
-            character = await self.db.characters.find_one({"_id": ObjectId(entity_id)})
+            character = await self.db.characters.find_one(entity_id)
 
             if not character:
                 raise HTTPException(
@@ -330,9 +344,9 @@ class CombatService:
                 )
 
             # Verificar se o usuário é o dono do personagem ou o DM
-            campaign = await self.db.campaigns.find_one({"_id": ObjectId(combat.get("campaign_id"))})
-            is_dm = campaign and campaign.get("dm_id") == user_id
-            is_owner = character.get("owner_id") == user_id
+            campaign = await self.db.campaigns.find_one(combat.get("campaign_id"))
+            is_dm = campaign and str(campaign.get("dm_id")) == str(user_id)
+            is_owner = str(character.get("owner_id")) == str(user_id)
 
             if not (is_dm or is_owner):
                 raise HTTPException(
@@ -351,7 +365,7 @@ class CombatService:
                 initiative_mod += dex_mod
 
         elif entity_type == "npc":
-            npc = await self.db.npcs.find_one({"_id": ObjectId(entity_id)})
+            npc = await self.db.npcs.find_one(entity_id)
 
             if not npc:
                 raise HTTPException(
@@ -360,8 +374,8 @@ class CombatService:
                 )
 
             # Apenas o DM pode adicionar NPCs à iniciativa
-            campaign = await self.db.campaigns.find_one({"_id": ObjectId(combat.get("campaign_id"))})
-            is_dm = campaign and campaign.get("dm_id") == user_id
+            campaign = await self.db.campaigns.find_one(combat.get("campaign_id"))
+            is_dm = campaign and str(campaign.get("dm_id")) == str(user_id)
 
             if not is_dm:
                 raise HTTPException(
@@ -391,7 +405,7 @@ class CombatService:
 
         # Criar entrada de iniciativa
         initiative_entry = {
-            "id": entity_id,
+            "id": str(entity_id),
             "type": entity_type,
             "initiative": initiative_value,
             "has_acted": False,
@@ -407,7 +421,7 @@ class CombatService:
 
         # Atualizar o combate
         await self.db.combats.update_one(
-            {"_id": ObjectId(combat_id)},
+            combat_id,
             {
                 "$set": {
                     "initiative_order": initiative_order,
@@ -421,7 +435,7 @@ class CombatService:
             "id": str(ObjectId()),
             "round": combat.get("round", 1),
             "turn": combat.get("current_turn", 0),
-            "actor_id": entity_id,
+            "actor_id": str(entity_id),
             "actor_type": entity_type,
             "event_type": "other",
             "description": f"{entity_name} rolou iniciativa: {initiative_value}",
@@ -435,14 +449,15 @@ class CombatService:
         }
 
         await self.db.combats.update_one(
-            {"_id": ObjectId(combat_id)},
+            combat_id,
             {"$push": {"events": event}}
         )
 
         # Recuperar o combate atualizado
-        updated_combat = await self.db.combats.find_one({"_id": ObjectId(combat_id)})
+        updated_combat = await self.db.combats.find_one(combat_id)
 
-        return updated_combat
+        # Formatar ID para string antes de retornar
+        return self._format_id(updated_combat)
 
     async def next_turn(self, combat_id: str, user_id: str) -> Dict[str, Any]:
         """
@@ -461,7 +476,7 @@ class CombatService:
         """
         # Verificar se o combate existe e está ativo
         combat = await self.db.combats.find_one({
-            "_id": ObjectId(combat_id),
+            "_id": combat_id,
             "status": "active"
         })
 
@@ -473,9 +488,9 @@ class CombatService:
 
         # Verificar se o usuário é o DM
         campaign_id = combat.get("campaign_id")
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        campaign = await self.db.campaigns.find_one(campaign_id)
 
-        if not campaign or campaign.get("dm_id") != user_id:
+        if not campaign or str(campaign.get("dm_id")) != str(user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Apenas o DM pode avançar o turno"
@@ -510,7 +525,7 @@ class CombatService:
 
         # Atualizar o combate
         await self.db.combats.update_one(
-            {"_id": ObjectId(combat_id)},
+            combat_id,
             {
                 "$set": {
                     "current_turn": next_turn,
@@ -522,7 +537,7 @@ class CombatService:
         )
 
         # Recuperar o combate atualizado
-        updated_combat = await self.db.combats.find_one({"_id": ObjectId(combat_id)})
+        updated_combat = await self.db.combats.find_one(combat_id)
 
         # Verificar condições que podem expirar no novo turno
         await self._process_condition_expirations(combat_id, new_round, next_turn)
@@ -545,11 +560,12 @@ class CombatService:
         }
 
         await self.db.combats.update_one(
-            {"_id": ObjectId(combat_id)},
+            combat_id,
             {"$push": {"events": event}}
         )
 
-        return updated_combat
+        # Formatar ID para string antes de retornar
+        return self._format_id(updated_combat)
 
     async def add_condition(
             self,
@@ -574,7 +590,7 @@ class CombatService:
         """
         # Verificar se o combate existe e está ativo
         combat = await self.db.combats.find_one({
-            "_id": ObjectId(combat_id),
+            "_id": combat_id,
             "status": "active"
         })
 
@@ -586,9 +602,9 @@ class CombatService:
 
         # Verificar se o usuário é o DM
         campaign_id = combat.get("campaign_id")
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        campaign = await self.db.campaigns.find_one(campaign_id)
 
-        if not campaign or campaign.get("dm_id") != user_id:
+        if not campaign or str(campaign.get("dm_id")) != str(user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Apenas o DM pode adicionar condições"
@@ -599,7 +615,7 @@ class CombatService:
 
         # Verificar se a entidade alvo existe
         if target_type == "character":
-            entity = await self.db.characters.find_one({"_id": ObjectId(target_id)})
+            entity = await self.db.characters.find_one(target_id)
             if not entity:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -609,7 +625,7 @@ class CombatService:
             entity_name = entity.get("name", "Personagem")
 
         elif target_type == "npc":
-            entity = await self.db.npcs.find_one({"_id": ObjectId(target_id)})
+            entity = await self.db.npcs.find_one(target_id)
             if not entity:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -627,7 +643,7 @@ class CombatService:
         # Verificar se a entidade está na ordem de iniciativa
         entity_in_combat = False
         for entry in combat.get("initiative_order", []):
-            if entry.get("id") == target_id and entry.get("type") == target_type:
+            if str(entry.get("id")) == str(target_id) and entry.get("type") == target_type:
                 entity_in_combat = True
                 break
 
@@ -639,6 +655,7 @@ class CombatService:
 
         # Preparar dados da condição
         condition_dict = condition_data.dict()
+        condition_dict["target_id"] = str(target_id)
 
         # Se a aplicação não foi especificada, usar os valores atuais do combate
         if not condition_dict.get("applied_at"):
@@ -653,7 +670,7 @@ class CombatService:
 
         # Atualizar o combate
         await self.db.combats.update_one(
-            {"_id": ObjectId(combat_id)},
+            combat_id,
             {
                 "$set": {
                     "conditions": conditions,
@@ -671,7 +688,7 @@ class CombatService:
                 character_conditions.append(condition_name)
 
                 await self.db.characters.update_one(
-                    {"_id": ObjectId(target_id)},
+                    target_id,
                     {
                         "$set": {
                             "conditions": character_conditions,
@@ -688,21 +705,22 @@ class CombatService:
             "actor_id": "system",
             "actor_type": "dm",
             "event_type": "condition",
-            "target_id": target_id,
+            "target_id": str(target_id),
             "target_type": target_type,
             "description": f"{entity_name} recebeu a condição: {condition_data.condition}",
             "timestamp": datetime.utcnow()
         }
 
         await self.db.combats.update_one(
-            {"_id": ObjectId(combat_id)},
+            combat_id,
             {"$push": {"events": event}}
         )
 
         # Recuperar o combate atualizado
-        updated_combat = await self.db.combats.find_one({"_id": ObjectId(combat_id)})
+        updated_combat = await self.db.combats.find_one(combat_id)
 
-        return updated_combat
+        # Formatar ID para string antes de retornar
+        return self._format_id(updated_combat)
 
     async def remove_condition(
             self,
@@ -727,7 +745,7 @@ class CombatService:
         """
         # Verificar se o combate existe e está ativo
         combat = await self.db.combats.find_one({
-            "_id": ObjectId(combat_id),
+            "_id": combat_id,
             "status": "active"
         })
 
@@ -739,9 +757,9 @@ class CombatService:
 
         # Verificar se o usuário é o DM
         campaign_id = combat.get("campaign_id")
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        campaign = await self.db.campaigns.find_one(campaign_id)
 
-        if not campaign or campaign.get("dm_id") != user_id:
+        if not campaign or str(campaign.get("dm_id")) != str(user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Apenas o DM pode remover condições"
@@ -755,7 +773,7 @@ class CombatService:
         condition_name = None
 
         for i, condition in enumerate(conditions):
-            if str(condition.get("id", i)) == condition_id:
+            if str(condition.get("id", i)) == str(condition_id):
                 condition_to_remove = i
                 target_id = condition.get("target_id")
                 target_type = condition.get("target_type")
@@ -773,7 +791,7 @@ class CombatService:
 
         # Atualizar o combate
         await self.db.combats.update_one(
-            {"_id": ObjectId(combat_id)},
+            combat_id,
             {
                 "$set": {
                     "conditions": conditions,
@@ -787,7 +805,7 @@ class CombatService:
             # Verificar se ainda existem outras condições do mesmo tipo para este personagem
             condition_exists = False
             for condition in conditions:
-                if (condition.get("target_id") == target_id and
+                if (str(condition.get("target_id")) == str(target_id) and
                         condition.get("target_type") == "character" and
                         condition.get("condition") == condition_name):
                     condition_exists = True
@@ -795,7 +813,7 @@ class CombatService:
 
             # Se não houver mais condições deste tipo, remover do personagem também
             if not condition_exists:
-                character = await self.db.characters.find_one({"_id": ObjectId(target_id)})
+                character = await self.db.characters.find_one(target_id)
                 if character:
                     character_conditions = character.get("conditions", [])
 
@@ -803,7 +821,7 @@ class CombatService:
                         character_conditions.remove(condition_name)
 
                         await self.db.characters.update_one(
-                            {"_id": ObjectId(target_id)},
+                            target_id,
                             {
                                 "$set": {
                                     "conditions": character_conditions,
@@ -815,11 +833,11 @@ class CombatService:
         # Buscar o nome da entidade para o evento
         entity_name = "Entidade desconhecida"
         if target_type == "character":
-            entity = await self.db.characters.find_one({"_id": ObjectId(target_id)})
+            entity = await self.db.characters.find_one(target_id)
             if entity:
                 entity_name = entity.get("name", "Personagem")
         elif target_type == "npc":
-            entity = await self.db.npcs.find_one({"_id": ObjectId(target_id)})
+            entity = await self.db.npcs.find_one(target_id)
             if entity:
                 entity_name = entity.get("name", "NPC")
 
@@ -831,21 +849,22 @@ class CombatService:
             "actor_id": "system",
             "actor_type": "dm",
             "event_type": "condition",
-            "target_id": target_id,
+            "target_id": str(target_id),
             "target_type": target_type,
             "description": f"{entity_name} não está mais sob a condição: {condition_name}",
             "timestamp": datetime.utcnow()
         }
 
         await self.db.combats.update_one(
-            {"_id": ObjectId(combat_id)},
+            combat_id,
             {"$push": {"events": event}}
         )
 
         # Recuperar o combate atualizado
-        updated_combat = await self.db.combats.find_one({"_id": ObjectId(combat_id)})
+        updated_combat = await self.db.combats.find_one(combat_id)
 
-        return updated_combat
+        # Formatar ID para string antes de retornar
+        return self._format_id(updated_combat)
 
     async def register_action(
             self,
@@ -870,7 +889,7 @@ class CombatService:
         """
         # Verificar se o combate existe e está ativo
         combat = await self.db.combats.find_one({
-            "_id": ObjectId(combat_id),
+            "_id": combat_id,
             "status": "active"
         })
 
@@ -885,8 +904,8 @@ class CombatService:
 
         # Verificar se é o DM ou se é o jogador cujo personagem está no turno atual
         campaign_id = combat.get("campaign_id")
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
-        is_dm = campaign and campaign.get("dm_id") == user_id
+        campaign = await self.db.campaigns.find_one(campaign_id)
+        is_dm = campaign and str(campaign.get("dm_id")) == str(user_id)
 
         current_turn = combat.get("current_turn", 0)
         initiative_order = combat.get("initiative_order", [])
@@ -909,8 +928,8 @@ class CombatService:
                     detail="Apenas o DM pode registrar ações para NPCs"
                 )
 
-            character = await self.db.characters.find_one({"_id": ObjectId(current_id)})
-            if not character or character.get("owner_id") != user_id:
+            character = await self.db.characters.find_one(current_id)
+            if not character or str(character.get("owner_id")) != str(user_id):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Não é seu turno para executar ações"
@@ -926,10 +945,10 @@ class CombatService:
             "id": str(ObjectId()),
             "round": combat.get("round", 1),
             "turn": current_turn,
-            "actor_id": current_id,
+            "actor_id": str(current_id),
             "actor_type": current_type,
             "event_type": action_type,
-            "target_id": target_id,
+            "target_id": str(target_id) if target_id else None,
             "target_type": target_type,
             "description": description,
             "timestamp": datetime.utcnow()
@@ -937,7 +956,7 @@ class CombatService:
 
         # Adicionar o evento ao combate
         await self.db.combats.update_one(
-            {"_id": ObjectId(combat_id)},
+            combat_id,
             {
                 "$push": {"events": event},
                 "$set": {"updated_at": datetime.utcnow()}
@@ -945,9 +964,10 @@ class CombatService:
         )
 
         # Recuperar o combate atualizado
-        updated_combat = await self.db.combats.find_one({"_id": ObjectId(combat_id)})
+        updated_combat = await self.db.combats.find_one(combat_id)
 
-        return updated_combat
+        # Formatar ID para string antes de retornar
+        return self._format_id(updated_combat)
 
     async def _process_condition_expirations(
             self,
@@ -963,7 +983,7 @@ class CombatService:
             round: Rodada atual
             turn: Turno atual
         """
-        combat = await self.db.combats.find_one({"_id": ObjectId(combat_id)})
+        combat = await self.db.combats.find_one(combat_id)
         if not combat:
             return
 
@@ -996,7 +1016,7 @@ class CombatService:
             # Registrar evento de expiração
             entity_name = "Entidade desconhecida"
             if target_type == "character":
-                entity = await self.db.characters.find_one({"_id": ObjectId(target_id)})
+                entity = await self.db.characters.find_one(target_id)
                 if entity:
                     entity_name = entity.get("name", "Personagem")
 
@@ -1004,7 +1024,7 @@ class CombatService:
                     other_same_condition_exists = False
                     for j, other_condition in enumerate(conditions):
                         if (j != i and
-                                other_condition.get("target_id") == target_id and
+                                str(other_condition.get("target_id")) == str(target_id) and
                                 other_condition.get("target_type") == "character" and
                                 other_condition.get("condition") == condition_name):
                             other_same_condition_exists = True
@@ -1016,7 +1036,7 @@ class CombatService:
                             character_conditions.remove(condition_name)
 
                             await self.db.characters.update_one(
-                                {"_id": ObjectId(target_id)},
+                                target_id,
                                 {
                                     "$set": {
                                         "conditions": character_conditions,
@@ -1026,7 +1046,7 @@ class CombatService:
                             )
 
             elif target_type == "npc":
-                entity = await self.db.npcs.find_one({"_id": ObjectId(target_id)})
+                entity = await self.db.npcs.find_one(target_id)
                 if entity:
                     entity_name = entity.get("name", "NPC")
 
@@ -1038,14 +1058,14 @@ class CombatService:
                 "actor_id": "system",
                 "actor_type": "dm",
                 "event_type": "condition",
-                "target_id": target_id,
+                "target_id": str(target_id),
                 "target_type": target_type,
                 "description": f"A condição '{condition_name}' em {entity_name} expirou",
                 "timestamp": datetime.utcnow()
             }
 
             await self.db.combats.update_one(
-                {"_id": ObjectId(combat_id)},
+                combat_id,
                 {"$push": {"events": event}}
             )
 
@@ -1054,7 +1074,7 @@ class CombatService:
             new_conditions = [condition for i, condition in enumerate(conditions) if i not in expired_conditions]
 
             await self.db.combats.update_one(
-                {"_id": ObjectId(combat_id)},
+                combat_id,
                 {"$set": {"conditions": new_conditions}}
             )
 
@@ -1070,7 +1090,7 @@ class CombatService:
             HTTPException: Se o usuário não tiver acesso
         """
         campaign_id = combat.get("campaign_id")
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        campaign = await self.db.campaigns.find_one(campaign_id)
 
         if not campaign:
             raise HTTPException(
@@ -1079,10 +1099,10 @@ class CombatService:
             )
 
         # Verificar se é o DM
-        is_dm = campaign.get("dm_id") == user_id
+        is_dm = str(campaign.get("dm_id")) == str(user_id)
 
         # Verificar se é um jogador
-        is_player = user_id in campaign.get("players", [])
+        is_player = str(user_id) in [str(p) for p in campaign.get("players", [])]
 
         if not (is_dm or is_player):
             raise HTTPException(

@@ -29,6 +29,16 @@ class CharacterService:
         """
         self.db = db
 
+    def _format_id(self, item):
+        """Formata o ID de um item para string."""
+        if item and "_id" in item:
+            item["_id"] = str(item["_id"])
+        return item
+
+    def _format_id_list(self, items):
+        """Formata os IDs de uma lista de itens para string."""
+        return [self._format_id(item) for item in items] if items else []
+
     async def create_character(self, character_data: CharacterCreateSchema) -> Dict[str, Any]:
         """
         Cria um novo personagem.
@@ -43,7 +53,7 @@ class CharacterService:
             HTTPException: Se o usuário ou campanha não existir
         """
         # Verificar se o usuário existe
-        user = await self.db.users.find_one({"_id": ObjectId(character_data.owner_id)})
+        user = await self.db.users.find_one(character_data.owner_id)
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -51,7 +61,7 @@ class CharacterService:
             )
 
         # Verificar se a campanha existe
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(character_data.campaign_id)})
+        campaign = await self.db.campaigns.find_one(character_data.campaign_id)
         if not campaign:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -59,8 +69,8 @@ class CharacterService:
             )
 
         # Verificar se o usuário está na campanha (como jogador ou DM)
-        is_player = character_data.owner_id in campaign.get("players", [])
-        is_dm = campaign.get("dm_id") == character_data.owner_id
+        is_player = str(character_data.owner_id) in [str(p) for p in campaign.get("players", [])]
+        is_dm = str(campaign.get("dm_id")) == str(character_data.owner_id)
 
         if not (is_player or is_dm):
             raise HTTPException(
@@ -80,9 +90,10 @@ class CharacterService:
         result = await self.db.characters.insert_one(character_dict)
 
         # Recuperar o personagem criado
-        created_character = await self.db.characters.find_one({"_id": result.inserted_id})
+        created_character = await self.db.characters.find_one(result.inserted_id)
 
-        return created_character
+        # Formatar ID para string antes de retornar
+        return self._format_id(created_character)
 
     async def get_character(self, character_id: str, user_id: str) -> Dict[str, Any]:
         """
@@ -99,7 +110,7 @@ class CharacterService:
             HTTPException: Se o personagem não for encontrado ou o usuário não tiver acesso
         """
         # Verificar se o personagem existe
-        character = await self.db.characters.find_one({"_id": ObjectId(character_id)})
+        character = await self.db.characters.find_one(character_id)
 
         if not character:
             raise HTTPException(
@@ -110,7 +121,8 @@ class CharacterService:
         # Verificar se o usuário tem acesso ao personagem
         await self._check_character_access(character, user_id)
 
-        return character
+        # Formatar ID para string antes de retornar
+        return self._format_id(character)
 
     async def update_character(
             self,
@@ -133,7 +145,7 @@ class CharacterService:
             HTTPException: Se o personagem não for encontrado ou o usuário não tiver acesso
         """
         # Verificar se o personagem existe
-        character = await self.db.characters.find_one({"_id": ObjectId(character_id)})
+        character = await self.db.characters.find_one(character_id)
 
         if not character:
             raise HTTPException(
@@ -152,14 +164,15 @@ class CharacterService:
 
         # Atualizar o personagem
         await self.db.characters.update_one(
-            {"_id": ObjectId(character_id)},
+            character_id,
             {"$set": update_data}
         )
 
         # Recuperar o personagem atualizado
-        updated_character = await self.db.characters.find_one({"_id": ObjectId(character_id)})
+        updated_character = await self.db.characters.find_one(character_id)
 
-        return updated_character
+        # Formatar ID para string antes de retornar
+        return self._format_id(updated_character)
 
     async def delete_character(self, character_id: str, user_id: str) -> bool:
         """
@@ -176,7 +189,7 @@ class CharacterService:
             HTTPException: Se o personagem não for encontrado ou o usuário não tiver acesso
         """
         # Verificar se o personagem existe
-        character = await self.db.characters.find_one({"_id": ObjectId(character_id)})
+        character = await self.db.characters.find_one(character_id)
 
         if not character:
             raise HTTPException(
@@ -186,13 +199,13 @@ class CharacterService:
 
         # Verificar se o usuário tem acesso ao personagem
         # Apenas o proprietário ou o DM podem excluir
-        is_owner = character.get("owner_id") == user_id
+        is_owner = str(character.get("owner_id")) == str(user_id)
 
         if not is_owner:
             # Verificar se é o DM da campanha
             campaign_id = character.get("campaign_id")
-            campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
-            is_dm = campaign and campaign.get("dm_id") == user_id
+            campaign = await self.db.campaigns.find_one(campaign_id)
+            is_dm = campaign and str(campaign.get("dm_id")) == str(user_id)
 
             if not is_dm:
                 raise HTTPException(
@@ -201,7 +214,7 @@ class CharacterService:
                 )
 
         # Excluir o personagem
-        result = await self.db.characters.delete_one({"_id": ObjectId(character_id)})
+        result = await self.db.characters.delete_one(character_id)
 
         return result.deleted_count > 0
 
@@ -218,7 +231,8 @@ class CharacterService:
         cursor = self.db.characters.find({"owner_id": user_id})
         characters = await cursor.to_list(length=100)
 
-        return characters
+        # Formatar IDs para string antes de retornar
+        return self._format_id_list(characters)
 
     async def list_characters_for_campaign(self, campaign_id: str, user_id: str) -> List[Dict[str, Any]]:
         """
@@ -235,7 +249,7 @@ class CharacterService:
             HTTPException: Se a campanha não for encontrada ou o usuário não tiver acesso
         """
         # Verificar se a campanha existe
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        campaign = await self.db.campaigns.find_one(campaign_id)
 
         if not campaign:
             raise HTTPException(
@@ -244,8 +258,8 @@ class CharacterService:
             )
 
         # Verificar se o usuário está na campanha (como jogador ou DM)
-        is_player = user_id in campaign.get("players", [])
-        is_dm = campaign.get("dm_id") == user_id
+        is_player = str(user_id) in [str(p) for p in campaign.get("players", [])]
+        is_dm = str(campaign.get("dm_id")) == str(user_id)
 
         if not (is_player or is_dm):
             raise HTTPException(
@@ -257,7 +271,8 @@ class CharacterService:
         cursor = self.db.characters.find({"campaign_id": campaign_id})
         characters = await cursor.to_list(length=100)
 
-        return characters
+        # Formatar IDs para string antes de retornar
+        return self._format_id_list(characters)
 
     async def update_hp(
             self,
@@ -282,7 +297,7 @@ class CharacterService:
             HTTPException: Se o personagem não for encontrado ou o usuário não tiver acesso
         """
         # Verificar se o personagem existe
-        character = await self.db.characters.find_one({"_id": ObjectId(character_id)})
+        character = await self.db.characters.find_one(character_id)
 
         if not character:
             raise HTTPException(
@@ -310,14 +325,15 @@ class CharacterService:
 
         # Atualizar o personagem
         await self.db.characters.update_one(
-            {"_id": ObjectId(character_id)},
+            character_id,
             {"$set": update_field}
         )
 
         # Recuperar o personagem atualizado
-        updated_character = await self.db.characters.find_one({"_id": ObjectId(character_id)})
+        updated_character = await self.db.characters.find_one(character_id)
 
-        return updated_character
+        # Formatar ID para string antes de retornar
+        return self._format_id(updated_character)
 
     async def add_condition(self, character_id: str, user_id: str, condition: str) -> Dict[str, Any]:
         """
@@ -335,7 +351,7 @@ class CharacterService:
             HTTPException: Se o personagem não for encontrado ou o usuário não tiver acesso
         """
         # Verificar se o personagem existe
-        character = await self.db.characters.find_one({"_id": ObjectId(character_id)})
+        character = await self.db.characters.find_one(character_id)
 
         if not character:
             raise HTTPException(
@@ -353,7 +369,7 @@ class CharacterService:
 
         # Atualizar o personagem
         await self.db.characters.update_one(
-            {"_id": ObjectId(character_id)},
+            character_id,
             {
                 "$set": {
                     "conditions": conditions,
@@ -363,9 +379,10 @@ class CharacterService:
         )
 
         # Recuperar o personagem atualizado
-        updated_character = await self.db.characters.find_one({"_id": ObjectId(character_id)})
+        updated_character = await self.db.characters.find_one(character_id)
 
-        return updated_character
+        # Formatar ID para string antes de retornar
+        return self._format_id(updated_character)
 
     async def remove_condition(self, character_id: str, user_id: str, condition: str) -> Dict[str, Any]:
         """
@@ -383,7 +400,7 @@ class CharacterService:
             HTTPException: Se o personagem não for encontrado ou o usuário não tiver acesso
         """
         # Verificar se o personagem existe
-        character = await self.db.characters.find_one({"_id": ObjectId(character_id)})
+        character = await self.db.characters.find_one(character_id)
 
         if not character:
             raise HTTPException(
@@ -401,7 +418,7 @@ class CharacterService:
 
         # Atualizar o personagem
         await self.db.characters.update_one(
-            {"_id": ObjectId(character_id)},
+            character_id,
             {
                 "$set": {
                     "conditions": conditions,
@@ -411,9 +428,10 @@ class CharacterService:
         )
 
         # Recuperar o personagem atualizado
-        updated_character = await self.db.characters.find_one({"_id": ObjectId(character_id)})
+        updated_character = await self.db.characters.find_one(character_id)
 
-        return updated_character
+        # Formatar ID para string antes de retornar
+        return self._format_id(updated_character)
 
     async def roll_ability_check(
             self,
@@ -440,7 +458,7 @@ class CharacterService:
             HTTPException: Se o personagem não for encontrado ou o usuário não tiver acesso
         """
         # Verificar se o personagem existe
-        character = await self.db.characters.find_one({"_id": ObjectId(character_id)})
+        character = await self.db.characters.find_one(character_id)
 
         if not character:
             raise HTTPException(
@@ -537,16 +555,16 @@ class CharacterService:
             HTTPException: Se o usuário não tiver acesso
         """
         # Verificar se é o proprietário
-        is_owner = character.get("owner_id") == user_id
+        is_owner = str(character.get("owner_id")) == str(user_id)
 
         if is_owner:
             return
 
         # Se não for o proprietário, verificar se é o DM da campanha
         campaign_id = character.get("campaign_id")
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        campaign = await self.db.campaigns.find_one(campaign_id)
 
-        is_dm = campaign and campaign.get("dm_id") == user_id
+        is_dm = campaign and str(campaign.get("dm_id")) == str(user_id)
 
         if not is_dm:
             raise HTTPException(

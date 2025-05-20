@@ -29,6 +29,16 @@ class CompendiumService:
         """
         self.db = db
 
+    def _format_id(self, item):
+        """Formata o ID de um item para string."""
+        if item and "_id" in item:
+            item["_id"] = str(item["_id"])
+        return item
+
+    def _format_id_list(self, items):
+        """Formata os IDs de uma lista de itens para string."""
+        return [self._format_id(item) for item in items] if items else []
+
     async def search_spells(
             self,
             query: Optional[str] = None,
@@ -90,7 +100,8 @@ class CompendiumService:
         cursor = self.db.spells.find(filter_query).limit(limit)
         spells = await cursor.to_list(length=limit)
 
-        return spells
+        # Formatar IDs para string antes de retornar
+        return self._format_id_list(spells)
 
     async def get_spell(self, spell_id: str) -> Dict[str, Any]:
         """
@@ -105,7 +116,7 @@ class CompendiumService:
         Raises:
             HTTPException: Se a magia não for encontrada
         """
-        spell = await self.db.spells.find_one({"_id": ObjectId(spell_id)})
+        spell = await self.db.spells.find_one(spell_id)
 
         if not spell:
             raise HTTPException(
@@ -113,7 +124,8 @@ class CompendiumService:
                 detail=f"Magia com ID {spell_id} não encontrada"
             )
 
-        return spell
+        # Formatar ID para string antes de retornar
+        return self._format_id(spell)
 
     async def search_items(
             self,
@@ -162,7 +174,8 @@ class CompendiumService:
         cursor = self.db.items.find(filter_query).limit(limit)
         items = await cursor.to_list(length=limit)
 
-        return items
+        # Formatar IDs para string antes de retornar
+        return self._format_id_list(items)
 
     async def get_item(self, item_id: str) -> Dict[str, Any]:
         """
@@ -177,7 +190,7 @@ class CompendiumService:
         Raises:
             HTTPException: Se o item não for encontrado
         """
-        item = await self.db.items.find_one({"_id": ObjectId(item_id)})
+        item = await self.db.items.find_one(item_id)
 
         if not item:
             raise HTTPException(
@@ -185,7 +198,8 @@ class CompendiumService:
                 detail=f"Item com ID {item_id} não encontrado"
             )
 
-        return item
+        # Formatar ID para string antes de retornar
+        return self._format_id(item)
 
     async def search_monsters(
             self,
@@ -246,7 +260,8 @@ class CompendiumService:
         cursor = self.db.monster_templates.find(filter_query).limit(limit)
         monsters = await cursor.to_list(length=limit)
 
-        return monsters
+        # Formatar IDs para string antes de retornar
+        return self._format_id_list(monsters)
 
     async def get_monster(self, monster_id: str) -> Dict[str, Any]:
         """
@@ -261,7 +276,7 @@ class CompendiumService:
         Raises:
             HTTPException: Se o monstro não for encontrado
         """
-        monster = await self.db.monster_templates.find_one({"_id": ObjectId(monster_id)})
+        monster = await self.db.monster_templates.find_one(monster_id)
 
         if not monster:
             raise HTTPException(
@@ -269,7 +284,8 @@ class CompendiumService:
                 detail=f"Monstro com ID {monster_id} não encontrado"
             )
 
-        return monster
+        # Formatar ID para string antes de retornar
+        return self._format_id(monster)
 
     async def search_compendium(self, search_data: CompendiumSearchSchema) -> Dict[str, List[Dict[str, Any]]]:
         """
@@ -343,7 +359,8 @@ class CompendiumService:
         cursor = self.db.spells.find(filter_query).sort("level", 1)
         spells = await cursor.to_list(length=100)
 
-        return spells
+        # Formatar IDs para string antes de retornar
+        return self._format_id_list(spells)
 
     async def get_spell_classes(self, spell_id: str) -> List[str]:
         """

@@ -36,6 +36,16 @@ class ImageService:
         # Criar diretório se não existir
         os.makedirs(self.upload_dir, exist_ok=True)
 
+    def _format_id(self, item):
+        """Formata o ID de um item para string."""
+        if item and "_id" in item:
+            item["_id"] = str(item["_id"])
+        return item
+
+    def _format_id_list(self, items):
+        """Formata os IDs de uma lista de itens para string."""
+        return [self._format_id(item) for item in items] if items else []
+
     async def upload_image(
             self,
             campaign_id: str,
@@ -70,7 +80,7 @@ class ImageService:
                           ou o upload falhar
         """
         # Verificar se a campanha existe
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        campaign = await self.db.campaigns.find_one(campaign_id)
 
         if not campaign:
             raise HTTPException(
@@ -79,7 +89,7 @@ class ImageService:
             )
 
         # Verificar se o usuário é o DM da campanha
-        if campaign.get("dm_id") != user_id:
+        if str(campaign.get("dm_id")) != str(user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Apenas o DM pode fazer upload de imagens para esta campanha"
@@ -160,7 +170,7 @@ class ImageService:
 
         # Atualizar a campanha
         await self.db.campaigns.update_one(
-            {"_id": ObjectId(campaign_id)},
+            campaign_id,
             {
                 "$set": {
                     "images": images,
@@ -193,7 +203,7 @@ class ImageService:
                           ou o usuário não tiver acesso
         """
         # Verificar se a campanha existe
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        campaign = await self.db.campaigns.find_one(campaign_id)
 
         if not campaign:
             raise HTTPException(
@@ -202,8 +212,8 @@ class ImageService:
             )
 
         # Verificar se o usuário tem acesso à campanha
-        is_dm = campaign.get("dm_id") == user_id
-        is_player = user_id in campaign.get("players", [])
+        is_dm = str(campaign.get("dm_id")) == str(user_id)
+        is_player = str(user_id) in [str(p) for p in campaign.get("players", [])]
 
         if not (is_dm or is_player):
             raise HTTPException(
@@ -216,7 +226,7 @@ class ImageService:
         images = campaign.get("images", [])
 
         for img in images:
-            if img.get("id") == image_id:
+            if str(img.get("id")) == str(image_id):
                 image = img
                 break
 
@@ -252,7 +262,7 @@ class ImageService:
                           ou o usuário não for o DM
         """
         # Verificar se a campanha existe
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        campaign = await self.db.campaigns.find_one(campaign_id)
 
         if not campaign:
             raise HTTPException(
@@ -261,7 +271,7 @@ class ImageService:
             )
 
         # Verificar se o usuário é o DM da campanha
-        if campaign.get("dm_id") != user_id:
+        if str(campaign.get("dm_id")) != str(user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Apenas o DM pode atualizar imagens desta campanha"
@@ -272,7 +282,7 @@ class ImageService:
         image_index = None
 
         for i, img in enumerate(images):
-            if img.get("id") == image_id:
+            if str(img.get("id")) == str(image_id):
                 image_index = i
                 break
 
@@ -300,7 +310,7 @@ class ImageService:
 
         # Atualizar a campanha
         await self.db.campaigns.update_one(
-            {"_id": ObjectId(campaign_id)},
+            campaign_id,
             {
                 "$set": {
                     "images": images,
@@ -333,7 +343,7 @@ class ImageService:
                           ou o usuário não for o DM
         """
         # Verificar se a campanha existe
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        campaign = await self.db.campaigns.find_one(campaign_id)
 
         if not campaign:
             raise HTTPException(
@@ -342,7 +352,7 @@ class ImageService:
             )
 
         # Verificar se o usuário é o DM da campanha
-        if campaign.get("dm_id") != user_id:
+        if str(campaign.get("dm_id")) != str(user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Apenas o DM pode excluir imagens desta campanha"
@@ -351,7 +361,7 @@ class ImageService:
         # Verificar se a imagem está sendo usada em algum encontro
         encounters = campaign.get("encounters", [])
         for encounter in encounters:
-            if encounter.get("map_image_id") == image_id:
+            if str(encounter.get("map_image_id")) == str(image_id):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Esta imagem está sendo usada como mapa no encontro '{encounter.get('name')}' e não pode ser excluída"
@@ -362,7 +372,7 @@ class ImageService:
         image_to_remove = None
 
         for i, img in enumerate(images):
-            if img.get("id") == image_id:
+            if str(img.get("id")) == str(image_id):
                 image_to_remove = img
                 del images[i]
                 break
@@ -375,7 +385,7 @@ class ImageService:
 
         # Atualizar a campanha
         await self.db.campaigns.update_one(
-            {"_id": ObjectId(campaign_id)},
+            campaign_id,
             {
                 "$set": {
                     "images": images,
@@ -398,9 +408,10 @@ class ImageService:
                 print(f"Erro ao excluir arquivo: {str(e)}")
 
         # Recuperar a campanha atualizada
-        updated_campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        updated_campaign = await self.db.campaigns.find_one(campaign_id)
 
-        return updated_campaign
+        # Formatar ID para string antes de retornar
+        return self._format_id(updated_campaign)
 
     async def list_images(
             self,
@@ -425,7 +436,7 @@ class ImageService:
             HTTPException: Se a campanha não for encontrada ou o usuário não tiver acesso
         """
         # Verificar se a campanha existe
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        campaign = await self.db.campaigns.find_one(campaign_id)
 
         if not campaign:
             raise HTTPException(
@@ -434,8 +445,8 @@ class ImageService:
             )
 
         # Verificar se o usuário tem acesso à campanha
-        is_dm = campaign.get("dm_id") == user_id
-        is_player = user_id in campaign.get("players", [])
+        is_dm = str(campaign.get("dm_id")) == str(user_id)
+        is_player = str(user_id) in [str(p) for p in campaign.get("players", [])]
 
         if not (is_dm or is_player):
             raise HTTPException(
@@ -488,9 +499,9 @@ class ImageService:
         image = await self.get_image(campaign_id, image_id, user_id)
 
         # Verificar se o usuário é o DM
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        campaign = await self.db.campaigns.find_one(campaign_id)
 
-        if campaign.get("dm_id") != user_id:
+        if str(campaign.get("dm_id")) != str(user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Apenas o DM pode compartilhar imagens"

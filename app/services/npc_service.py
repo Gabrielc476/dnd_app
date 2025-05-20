@@ -30,6 +30,16 @@ class NPCService:
         """
         self.db = db
 
+    def _format_id(self, item):
+        """Formata o ID de um item para string."""
+        if item and "_id" in item:
+            item["_id"] = str(item["_id"])
+        return item
+
+    def _format_id_list(self, items):
+        """Formata os IDs de uma lista de itens para string."""
+        return [self._format_id(item) for item in items] if items else []
+
     async def create_npc(self, npc_data: NPCCreateSchema, user_id: str) -> Dict[str, Any]:
         """
         Cria um novo NPC.
@@ -45,7 +55,7 @@ class NPCService:
             HTTPException: Se a campanha não existir ou o usuário não for o DM
         """
         # Verificar se a campanha existe
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(npc_data.campaign_id)})
+        campaign = await self.db.campaigns.find_one(npc_data.campaign_id)
 
         if not campaign:
             raise HTTPException(
@@ -54,7 +64,7 @@ class NPCService:
             )
 
         # Verificar se o usuário é o DM da campanha
-        if campaign.get("dm_id") != user_id:
+        if str(campaign.get("dm_id")) != str(user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Apenas o DM pode criar NPCs nesta campanha"
@@ -62,7 +72,7 @@ class NPCService:
 
         # Se for do compêndio, verificar se o modelo existe
         if npc_data.source == "compendium" and npc_data.compendium_id:
-            monster = await self.db.monster_templates.find_one({"_id": ObjectId(npc_data.compendium_id)})
+            monster = await self.db.monster_templates.find_one(npc_data.compendium_id)
 
             if not monster:
                 raise HTTPException(
@@ -82,9 +92,10 @@ class NPCService:
         result = await self.db.npcs.insert_one(npc_dict)
 
         # Recuperar o NPC criado
-        created_npc = await self.db.npcs.find_one({"_id": result.inserted_id})
+        created_npc = await self.db.npcs.find_one(result.inserted_id)
 
-        return created_npc
+        # Formatar ID para string antes de retornar
+        return self._format_id(created_npc)
 
     async def get_npc(self, npc_id: str, user_id: str) -> Dict[str, Any]:
         """
@@ -101,7 +112,7 @@ class NPCService:
             HTTPException: Se o NPC não for encontrado ou o usuário não tiver acesso
         """
         # Verificar se o NPC existe
-        npc = await self.db.npcs.find_one({"_id": ObjectId(npc_id)})
+        npc = await self.db.npcs.find_one(npc_id)
 
         if not npc:
             raise HTTPException(
@@ -112,7 +123,8 @@ class NPCService:
         # Verificar se o usuário tem acesso ao NPC
         await self._check_npc_access(npc, user_id)
 
-        return npc
+        # Formatar ID para string antes de retornar
+        return self._format_id(npc)
 
     async def update_npc(
             self,
@@ -135,7 +147,7 @@ class NPCService:
             HTTPException: Se o NPC não for encontrado ou o usuário não for o DM
         """
         # Verificar se o NPC existe
-        npc = await self.db.npcs.find_one({"_id": ObjectId(npc_id)})
+        npc = await self.db.npcs.find_one(npc_id)
 
         if not npc:
             raise HTTPException(
@@ -145,9 +157,9 @@ class NPCService:
 
         # Verificar se o usuário é o DM da campanha
         campaign_id = npc.get("campaign_id")
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        campaign = await self.db.campaigns.find_one(campaign_id)
 
-        if not campaign or campaign.get("dm_id") != user_id:
+        if not campaign or str(campaign.get("dm_id")) != str(user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Apenas o DM pode atualizar este NPC"
@@ -161,14 +173,15 @@ class NPCService:
 
         # Atualizar o NPC
         await self.db.npcs.update_one(
-            {"_id": ObjectId(npc_id)},
+            npc_id,
             {"$set": update_data}
         )
 
         # Recuperar o NPC atualizado
-        updated_npc = await self.db.npcs.find_one({"_id": ObjectId(npc_id)})
+        updated_npc = await self.db.npcs.find_one(npc_id)
 
-        return updated_npc
+        # Formatar ID para string antes de retornar
+        return self._format_id(updated_npc)
 
     async def delete_npc(self, npc_id: str, user_id: str) -> bool:
         """
@@ -185,7 +198,7 @@ class NPCService:
             HTTPException: Se o NPC não for encontrado ou o usuário não for o DM
         """
         # Verificar se o NPC existe
-        npc = await self.db.npcs.find_one({"_id": ObjectId(npc_id)})
+        npc = await self.db.npcs.find_one(npc_id)
 
         if not npc:
             raise HTTPException(
@@ -195,9 +208,9 @@ class NPCService:
 
         # Verificar se o usuário é o DM da campanha
         campaign_id = npc.get("campaign_id")
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        campaign = await self.db.campaigns.find_one(campaign_id)
 
-        if not campaign or campaign.get("dm_id") != user_id:
+        if not campaign or str(campaign.get("dm_id")) != str(user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Apenas o DM pode excluir este NPC"
@@ -208,7 +221,7 @@ class NPCService:
         for encounter in encounters:
             npcs = encounter.get("npcs", [])
             for npc_ref in npcs:
-                if npc_ref.get("npc_id") == npc_id:
+                if str(npc_ref.get("npc_id")) == str(npc_id):
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"Este NPC está sendo usado no encontro '{encounter.get('name')}' e não pode ser excluído"
@@ -222,14 +235,14 @@ class NPCService:
 
         if active_combat:
             for entry in active_combat.get("initiative_order", []):
-                if entry.get("id") == npc_id and entry.get("type") == "npc":
+                if str(entry.get("id")) == str(npc_id) and entry.get("type") == "npc":
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="Este NPC está em um combate ativo e não pode ser excluído"
                     )
 
         # Excluir o NPC
-        result = await self.db.npcs.delete_one({"_id": ObjectId(npc_id)})
+        result = await self.db.npcs.delete_one(npc_id)
 
         return result.deleted_count > 0
 
@@ -248,7 +261,7 @@ class NPCService:
             HTTPException: Se a campanha não for encontrada ou o usuário não tiver acesso
         """
         # Verificar se a campanha existe
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        campaign = await self.db.campaigns.find_one(campaign_id)
 
         if not campaign:
             raise HTTPException(
@@ -257,8 +270,8 @@ class NPCService:
             )
 
         # Verificar se o usuário está na campanha (como jogador ou DM)
-        is_dm = campaign.get("dm_id") == user_id
-        is_player = user_id in campaign.get("players", [])
+        is_dm = str(campaign.get("dm_id")) == str(user_id)
+        is_player = str(user_id) in [str(p) for p in campaign.get("players", [])]
 
         if not (is_dm or is_player):
             raise HTTPException(
@@ -270,7 +283,8 @@ class NPCService:
         cursor = self.db.npcs.find({"campaign_id": campaign_id})
         npcs = await cursor.to_list(length=100)
 
-        return npcs
+        # Formatar IDs para string antes de retornar
+        return self._format_id_list(npcs)
 
     async def import_from_compendium(
             self,
@@ -295,7 +309,7 @@ class NPCService:
             HTTPException: Se a campanha ou monstro não forem encontrados, ou o usuário não for o DM
         """
         # Verificar se a campanha existe
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        campaign = await self.db.campaigns.find_one(campaign_id)
 
         if not campaign:
             raise HTTPException(
@@ -304,14 +318,14 @@ class NPCService:
             )
 
         # Verificar se o usuário é o DM da campanha
-        if campaign.get("dm_id") != user_id:
+        if str(campaign.get("dm_id")) != str(user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Apenas o DM pode importar NPCs do compêndio"
             )
 
         # Verificar se o monstro existe no compêndio
-        monster = await self.db.monster_templates.find_one({"_id": ObjectId(monster_id)})
+        monster = await self.db.monster_templates.find_one(monster_id)
 
         if not monster:
             raise HTTPException(
@@ -378,8 +392,8 @@ class NPCService:
         npc_data = {
             "name": name,
             "source": "compendium",
-            "compendium_id": monster_id,
-            "campaign_id": campaign_id,
+            "compendium_id": str(monster_id),
+            "campaign_id": str(campaign_id),
             "stats": stats,
             "actions": actions,
             "legendary_actions": legendary_actions,
@@ -394,9 +408,10 @@ class NPCService:
         result = await self.db.npcs.insert_one(npc_data)
 
         # Recuperar o NPC criado
-        created_npc = await self.db.npcs.find_one({"_id": result.inserted_id})
+        created_npc = await self.db.npcs.find_one(result.inserted_id)
 
-        return created_npc
+        # Formatar ID para string antes de retornar
+        return self._format_id(created_npc)
 
     async def bulk_import(
             self,
@@ -419,7 +434,7 @@ class NPCService:
             HTTPException: Se a campanha não existir ou o usuário não for o DM
         """
         # Verificar se a campanha existe
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        campaign = await self.db.campaigns.find_one(campaign_id)
 
         if not campaign:
             raise HTTPException(
@@ -428,7 +443,7 @@ class NPCService:
             )
 
         # Verificar se o usuário é o DM da campanha
-        if campaign.get("dm_id") != user_id:
+        if str(campaign.get("dm_id")) != str(user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Apenas o DM pode importar NPCs"
@@ -436,7 +451,7 @@ class NPCService:
 
         # Validar que todos os NPCs pertencem a esta campanha
         for npc_data in import_data.npcs:
-            if npc_data.campaign_id != campaign_id:
+            if npc_data.campaign_id != str(campaign_id):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Todos os NPCs devem pertencer à campanha especificada"
@@ -460,7 +475,8 @@ class NPCService:
             {"_id": {"$in": result.inserted_ids}}
         ).to_list(length=len(result.inserted_ids))
 
-        return created_npcs
+        # Formatar IDs para string antes de retornar
+        return self._format_id_list(created_npcs)
 
     async def update_hp(
             self,
@@ -483,7 +499,7 @@ class NPCService:
             HTTPException: Se o NPC não for encontrado ou o usuário não for o DM
         """
         # Verificar se o NPC existe
-        npc = await self.db.npcs.find_one({"_id": ObjectId(npc_id)})
+        npc = await self.db.npcs.find_one(npc_id)
 
         if not npc:
             raise HTTPException(
@@ -493,9 +509,9 @@ class NPCService:
 
         # Verificar se o usuário é o DM da campanha
         campaign_id = npc.get("campaign_id")
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        campaign = await self.db.campaigns.find_one(campaign_id)
 
-        if not campaign or campaign.get("dm_id") != user_id:
+        if not campaign or str(campaign.get("dm_id")) != str(user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Apenas o DM pode atualizar os pontos de vida deste NPC"
@@ -510,7 +526,7 @@ class NPCService:
 
         # Atualizar o NPC
         await self.db.npcs.update_one(
-            {"_id": ObjectId(npc_id)},
+            npc_id,
             {
                 "$set": {
                     "stats.hp.current": new_hp,
@@ -520,9 +536,10 @@ class NPCService:
         )
 
         # Recuperar o NPC atualizado
-        updated_npc = await self.db.npcs.find_one({"_id": ObjectId(npc_id)})
+        updated_npc = await self.db.npcs.find_one(npc_id)
 
-        return updated_npc
+        # Formatar ID para string antes de retornar
+        return self._format_id(updated_npc)
 
     async def _check_npc_access(self, npc: Dict[str, Any], user_id: str) -> None:
         """
@@ -536,7 +553,7 @@ class NPCService:
             HTTPException: Se o usuário não tiver acesso
         """
         campaign_id = npc.get("campaign_id")
-        campaign = await self.db.campaigns.find_one({"_id": ObjectId(campaign_id)})
+        campaign = await self.db.campaigns.find_one(campaign_id)
 
         if not campaign:
             raise HTTPException(
@@ -545,10 +562,10 @@ class NPCService:
             )
 
         # Verificar se é o DM
-        is_dm = campaign.get("dm_id") == user_id
+        is_dm = str(campaign.get("dm_id")) == str(user_id)
 
         # Verificar se é um jogador
-        is_player = user_id in campaign.get("players", [])
+        is_player = str(user_id) in [str(p) for p in campaign.get("players", [])]
 
         if not (is_dm or is_player):
             raise HTTPException(
