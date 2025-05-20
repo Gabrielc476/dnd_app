@@ -20,8 +20,6 @@ async def get_current_user(
         payload = decode_access_token(token)
         user_id = payload.get("sub")
 
-        print(f"Procurando usuário com ID: {user_id}")
-
         if user_id is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -29,38 +27,31 @@ async def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # Primeira tentativa - usando ObjectId
+        # Convert string ID to ObjectId for MongoDB query
         try:
-            user = await db.users.find_one({"_id": ObjectId(user_id)})
-            print(f"Busca com ObjectId: {'sucesso' if user else 'falha'}")
+            # This is the key fix - explicitly convert to ObjectId
+            object_id = ObjectId(user_id)
+            user = await db.users.find_one({"_id": object_id})
+
+            if user:
+                return User(**user)
         except Exception as e:
-            print(f"Erro ao converter para ObjectId: {e}")
-            user = None
+            print(f"Error converting ID to ObjectId: {e}")
 
-        # Segunda tentativa - usando a string diretamente
-        if user is None:
-            user = await db.users.find_one({"_id": user_id})
-            print(f"Busca com string: {'sucesso' if user else 'falha'}")
+        # Fallback - try finding by string ID
+        user = await db.users.find_one({"_id": user_id})
 
-        # Terceira tentativa - verificar todos os usuários para debug
-        if user is None:
-            print("Usuário não encontrado. Verificando todos os usuários:")
-            users = await db.users.find().to_list(length=10)
-            print(f"Total de usuários: {len(users)}")
-            for u in users:
-                print(f"ID: {u.get('_id')} - Username: {u.get('username')}")
+        if user:
+            return User(**user)
 
-        if user is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Usuário não encontrado",
-            )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuário não encontrado",
+        )
 
-        return User(**user)
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Erro geral em get_current_user: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro interno: {str(e)}",

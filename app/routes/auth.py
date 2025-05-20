@@ -172,3 +172,20 @@ async def read_users_me(current_user: User = Depends(get_current_user)) -> User:
         Dados do usuário atual
     """
     return current_user
+
+
+@router.get("/debug-users")
+async def debug_users(db: AsyncIOMotorDatabase = Depends(get_database)):
+    """FOR DEBUGGING ONLY - List all users and their ID formats"""
+    users = await db.users.find().to_list(length=100)
+    user_data = []
+
+    for user in users:
+        user_data.append({
+            "id": str(user.get("_id")),
+            "id_type": type(user.get("_id")).__name__,
+            "username": user.get("username"),
+            "role": user.get("role")
+        })
+
+    return {"users": user_data}

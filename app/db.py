@@ -38,15 +38,36 @@ class SafeCollection:
         # Se o filtro for apenas um ID
         if not isinstance(filter, dict):
             try:
-                return await self._collection.find_one({"_id": safe_object_id(filter)}, *args, **kwargs)
+                # Tenta converter para ObjectId primeiro
+                object_id = safe_object_id(filter)
+                result = await self._collection.find_one({"_id": object_id}, *args, **kwargs)
+                if result:
+                    return result
+
+                # Se não encontrar, tenta com o ID original
+                if object_id != filter:
+                    return await self._collection.find_one({"_id": filter}, *args, **kwargs)
+                return None
             except Exception:
+                # Fallback para o comportamento original
                 return await self._collection.find_one({"_id": filter}, *args, **kwargs)
 
         # Se o filtro for um dicionário com _id
         if "_id" in filter:
             filter_copy = filter.copy()
-            filter_copy["_id"] = safe_object_id(filter["_id"])
-            return await self._collection.find_one(filter_copy, *args, **kwargs)
+            original_id = filter["_id"]
+            filter_copy["_id"] = safe_object_id(original_id)
+
+            # Tenta com ObjectId
+            result = await self._collection.find_one(filter_copy, *args, **kwargs)
+            if result:
+                return result
+
+            # Se não encontrar e o ID foi alterado, tenta com o original
+            if filter_copy["_id"] != original_id:
+                filter_copy["_id"] = original_id
+                return await self._collection.find_one(filter_copy, *args, **kwargs)
+            return None
 
         return await self._collection.find_one(filter, *args, **kwargs)
 
@@ -54,14 +75,35 @@ class SafeCollection:
         """Wrapper para update_one que lida com IDs de forma segura."""
         if not isinstance(filter, dict):
             try:
-                return await self._collection.update_one({"_id": safe_object_id(filter)}, update, *args, **kwargs)
+                # Tenta converter para ObjectId primeiro
+                object_id = safe_object_id(filter)
+                result = await self._collection.update_one({"_id": object_id}, update, *args, **kwargs)
+                if result.matched_count > 0:
+                    return result
+
+                # Se não encontrar, tenta com o ID original
+                if object_id != filter:
+                    return await self._collection.update_one({"_id": filter}, update, *args, **kwargs)
+                return result
             except Exception:
+                # Fallback para o comportamento original
                 return await self._collection.update_one({"_id": filter}, update, *args, **kwargs)
 
         if "_id" in filter:
             filter_copy = filter.copy()
-            filter_copy["_id"] = safe_object_id(filter["_id"])
-            return await self._collection.update_one(filter_copy, update, *args, **kwargs)
+            original_id = filter["_id"]
+            filter_copy["_id"] = safe_object_id(original_id)
+
+            # Tenta com ObjectId
+            result = await self._collection.update_one(filter_copy, update, *args, **kwargs)
+            if result.matched_count > 0:
+                return result
+
+            # Se não encontrar e o ID foi alterado, tenta com o original
+            if filter_copy["_id"] != original_id:
+                filter_copy["_id"] = original_id
+                return await self._collection.update_one(filter_copy, update, *args, **kwargs)
+            return result
 
         return await self._collection.update_one(filter, update, *args, **kwargs)
 
@@ -69,16 +111,72 @@ class SafeCollection:
         """Wrapper para delete_one que lida com IDs de forma segura."""
         if not isinstance(filter, dict):
             try:
-                return await self._collection.delete_one({"_id": safe_object_id(filter)}, *args, **kwargs)
+                # Tenta converter para ObjectId primeiro
+                object_id = safe_object_id(filter)
+                result = await self._collection.delete_one({"_id": object_id}, *args, **kwargs)
+                if result.deleted_count > 0:
+                    return result
+
+                # Se não encontrar, tenta com o ID original
+                if object_id != filter:
+                    return await self._collection.delete_one({"_id": filter}, *args, **kwargs)
+                return result
             except Exception:
+                # Fallback para o comportamento original
                 return await self._collection.delete_one({"_id": filter}, *args, **kwargs)
 
         if "_id" in filter:
             filter_copy = filter.copy()
-            filter_copy["_id"] = safe_object_id(filter["_id"])
-            return await self._collection.delete_one(filter_copy, *args, **kwargs)
+            original_id = filter["_id"]
+            filter_copy["_id"] = safe_object_id(original_id)
+
+            # Tenta com ObjectId
+            result = await self._collection.delete_one(filter_copy, *args, **kwargs)
+            if result.deleted_count > 0:
+                return result
+
+            # Se não encontrar e o ID foi alterado, tenta com o original
+            if filter_copy["_id"] != original_id:
+                filter_copy["_id"] = original_id
+                return await self._collection.delete_one(filter_copy, update, *args, **kwargs)
+            return result
 
         return await self._collection.delete_one(filter, *args, **kwargs)
+
+    async def find(self, *args, **kwargs):
+        """Mantem o método find original."""
+        return self._collection.find(*args, **kwargs)
+
+    async def insert_one(self, document, *args, **kwargs):
+        """Wrapper para insert_one que garante ObjectId."""
+        if document and "_id" in document and not isinstance(document["_id"], ObjectId):
+            document_copy = document.copy()
+            try:
+                document_copy["_id"] = ObjectId(document["_id"])
+                return await self._collection.insert_one(document_copy, *args, **kwargs)
+            except (InvalidId, TypeError):
+                # Fallback - usa o documento original
+                pass
+
+        return await self._collection.insert_one(document, *args, **kwargs)
+
+    async def insert_many(self, documents, *args, **kwargs):
+        """Wrapper para insert_many que garante ObjectId."""
+        if not documents:
+            return await self._collection.insert_many(documents, *args, **kwargs)
+
+        documents_copy = []
+        for doc in documents:
+            doc_copy = doc.copy()
+            if "_id" in doc and not isinstance(doc["_id"], ObjectId):
+                try:
+                    doc_copy["_id"] = ObjectId(doc["_id"])
+                except (InvalidId, TypeError):
+                    # Mantém o ID original se a conversão falhar
+                    pass
+            documents_copy.append(doc_copy)
+
+        return await self._collection.insert_many(documents_copy, *args, **kwargs)
 
     # Delegar todas as outras operações à coleção original
     def __getattr__(self, name):

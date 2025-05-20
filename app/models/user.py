@@ -4,6 +4,7 @@ from typing import Optional, Literal, Any
 from pydantic import BaseModel, Field, EmailStr
 from bson import ObjectId
 from bson.errors import InvalidId
+from app.utils.id_handler import IdHandler
 
 
 class PyObjectId(str):
@@ -21,39 +22,18 @@ class PyObjectId(str):
         if v is None:
             return None
 
-        if isinstance(v, ObjectId):
+        if IdHandler.is_valid_id(v):
             return str(v)
-
-        if isinstance(v, str):
-            try:
-                ObjectId(v)
-                return v
-            except (InvalidId, TypeError):
-                raise ValueError("Invalid ObjectId")
-
-        try:
-            return str(ObjectId(str(v)))
-        except (InvalidId, TypeError):
-            raise ValueError("Invalid ObjectId")
+        raise ValueError("Invalid ObjectId")
 
     @classmethod
     def to_object_id(cls, v):
         """Converte para ObjectId se possível, ou retorna None."""
-        if v is None:
-            return None
-
-        if isinstance(v, ObjectId):
-            return v
-
-        try:
-            return ObjectId(str(v))
-        except (InvalidId, TypeError):
-            return None
+        return IdHandler.to_object_id(v)
 
     # Para uso como factory
     def __new__(cls, *args, **kwargs):
         return str(ObjectId())
-
 
 class User(BaseModel):
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
