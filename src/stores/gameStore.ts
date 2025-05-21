@@ -13,6 +13,7 @@ import {
 import { campaignsAPI } from "@/lib/api";
 import { useCharacterStore } from "./characterStore";
 import { useCombatStore } from "./combatStore";
+import { useNPCStore } from "./npcStore";
 
 interface WebSocketConnectionStatus {
   connected: boolean;
@@ -24,6 +25,13 @@ interface LockStatus {
   resourceType: string;
   resourceId: string;
   lockedBy: string;
+  timestamp: string;
+}
+
+interface Notification {
+  id: string;
+  type: "info" | "success" | "warning" | "error";
+  message: string;
   timestamp: string;
 }
 
@@ -48,12 +56,7 @@ interface GameState {
   // UI state
   sidebarOpen: boolean;
   selectedTab: "characters" | "npcs" | "combat" | "encounters" | "maps";
-  notifications: Array<{
-    id: string;
-    type: string;
-    message: string;
-    timestamp: string;
-  }>;
+  notifications: Notification[];
 
   // Loading and error states
   isLoading: boolean;
@@ -127,19 +130,27 @@ interface GameState {
     resourceId: string,
     userId: string
   ) => boolean;
+  getResourceLocker: (
+    resourceType: string,
+    resourceId: string
+  ) => string | null;
 
   // UI actions
   toggleSidebar: () => void;
   setSelectedTab: (
     tab: "characters" | "npcs" | "combat" | "encounters" | "maps"
   ) => void;
-  addNotification: (type: string, message: string) => void;
+  addNotification: (
+    type: "info" | "success" | "warning" | "error",
+    message: string
+  ) => void;
   clearNotification: (id: string) => void;
   clearAllNotifications: () => void;
 
   // System actions
   setCurrentUser: (user: User | null) => void;
   resetState: () => void;
+  loadUserData: () => Promise<void>;
 }
 
 export const useGameStore = create<GameState>()(
@@ -216,6 +227,24 @@ export const useGameStore = create<GameState>()(
 
           // Reset active map when changing campaigns
           set({ activeMap: null });
+
+          // Connect to relevant data sources
+          if (campaign) {
+            // Load campaign images
+            get().fetchImages(campaign._id);
+
+            // Load characters for the campaign
+            const characterStore = useCharacterStore.getState();
+            characterStore.fetchCharacters(campaign._id);
+
+            // Load NPCs for the campaign
+            const npcStore = useNPCStore.getState();
+            npcStore.fetchNPCs(campaign._id);
+
+            // Check for active combat
+            const combatStore = useCombatStore.getState();
+            combatStore.fetchActiveCombat(campaign._id);
+          }
         },
 
         createCampaign: async (data: {
@@ -254,12 +283,25 @@ export const useGameStore = create<GameState>()(
               isLoading: false,
             }));
 
+            // Add success notification
+            get().addNotification(
+              "success",
+              `Campaign "${campaign.name}" created successfully`
+            );
+
             return campaign;
           } catch (error: any) {
             set({
               error: error.message || "Failed to create campaign",
               isLoading: false,
             });
+
+            // Add error notification
+            get().addNotification(
+              "error",
+              `Failed to create campaign: ${error.message}`
+            );
+
             return null;
           }
         },
@@ -297,12 +339,25 @@ export const useGameStore = create<GameState>()(
               set({ currentCampaign: campaign });
             }
 
+            // Add success notification
+            get().addNotification(
+              "success",
+              `Campaign "${campaign.name}" updated successfully`
+            );
+
             return campaign;
           } catch (error: any) {
             set({
               error: error.message || "Failed to update campaign",
               isLoading: false,
             });
+
+            // Add error notification
+            get().addNotification(
+              "error",
+              `Failed to update campaign: ${error.message}`
+            );
+
             return null;
           }
         },
@@ -311,6 +366,11 @@ export const useGameStore = create<GameState>()(
           set({ isLoading: true, error: null });
           try {
             await campaignsAPI.deleteCampaign(campaignId);
+
+            // Get campaign name before removing it
+            const campaignName =
+              get().campaigns.find((c) => c._id === campaignId)?.name ||
+              "Campaign";
 
             // Remove from campaigns list
             set((state) => ({
@@ -323,12 +383,25 @@ export const useGameStore = create<GameState>()(
               isLoading: false,
             }));
 
+            // Add success notification
+            get().addNotification(
+              "success",
+              `Campaign "${campaignName}" deleted successfully`
+            );
+
             return true;
           } catch (error: any) {
             set({
               error: error.message || "Failed to delete campaign",
               isLoading: false,
             });
+
+            // Add error notification
+            get().addNotification(
+              "error",
+              `Failed to delete campaign: ${error.message}`
+            );
+
             return false;
           }
         },
@@ -353,12 +426,22 @@ export const useGameStore = create<GameState>()(
               isLoading: false,
             }));
 
+            // Add success notification
+            get().addNotification("success", "Player added to campaign");
+
             return true;
           } catch (error: any) {
             set({
               error: error.message || "Failed to add player",
               isLoading: false,
             });
+
+            // Add error notification
+            get().addNotification(
+              "error",
+              `Failed to add player: ${error.message}`
+            );
+
             return false;
           }
         },
@@ -390,12 +473,22 @@ export const useGameStore = create<GameState>()(
               isLoading: false,
             }));
 
+            // Add success notification
+            get().addNotification("success", "Player removed from campaign");
+
             return true;
           } catch (error: any) {
             set({
               error: error.message || "Failed to remove player",
               isLoading: false,
             });
+
+            // Add error notification
+            get().addNotification(
+              "error",
+              `Failed to remove player: ${error.message}`
+            );
+
             return false;
           }
         },
@@ -420,6 +513,9 @@ export const useGameStore = create<GameState>()(
               set({ currentCampaign: campaign });
             }
 
+            // Add success notification
+            get().addNotification("success", "Encounter created successfully");
+
             set({ isLoading: false });
             return true;
           } catch (error: any) {
@@ -427,6 +523,13 @@ export const useGameStore = create<GameState>()(
               error: error.message || "Failed to create encounter",
               isLoading: false,
             });
+
+            // Add error notification
+            get().addNotification(
+              "error",
+              `Failed to create encounter: ${error.message}`
+            );
+
             return false;
           }
         },
@@ -449,6 +552,9 @@ export const useGameStore = create<GameState>()(
               set({ currentCampaign: campaign });
             }
 
+            // Add success notification
+            get().addNotification("success", "Encounter updated successfully");
+
             set({ isLoading: false });
             return true;
           } catch (error: any) {
@@ -456,6 +562,13 @@ export const useGameStore = create<GameState>()(
               error: error.message || "Failed to update encounter",
               isLoading: false,
             });
+
+            // Add error notification
+            get().addNotification(
+              "error",
+              `Failed to update encounter: ${error.message}`
+            );
+
             return false;
           }
         },
@@ -473,6 +586,9 @@ export const useGameStore = create<GameState>()(
               set({ currentCampaign: campaign });
             }
 
+            // Add success notification
+            get().addNotification("success", "Encounter deleted successfully");
+
             set({ isLoading: false });
             return true;
           } catch (error: any) {
@@ -480,6 +596,13 @@ export const useGameStore = create<GameState>()(
               error: error.message || "Failed to delete encounter",
               isLoading: false,
             });
+
+            // Add error notification
+            get().addNotification(
+              "error",
+              `Failed to delete encounter: ${error.message}`
+            );
+
             return false;
           }
         },
@@ -497,6 +620,17 @@ export const useGameStore = create<GameState>()(
               set({ currentCampaign: campaign });
             }
 
+            // Find encounter name
+            const encounterName =
+              campaign.encounters.find((e) => e.id === encounterId)?.name ||
+              "Encounter";
+
+            // Add success notification
+            get().addNotification(
+              "success",
+              `Active encounter set to "${encounterName}"`
+            );
+
             set({ isLoading: false });
             return true;
           } catch (error: any) {
@@ -504,6 +638,13 @@ export const useGameStore = create<GameState>()(
               error: error.message || "Failed to set active encounter",
               isLoading: false,
             });
+
+            // Add error notification
+            get().addNotification(
+              "error",
+              `Failed to set active encounter: ${error.message}`
+            );
+
             return false;
           }
         },
@@ -520,6 +661,9 @@ export const useGameStore = create<GameState>()(
               set({ currentCampaign: campaign });
             }
 
+            // Add info notification
+            get().addNotification("info", "Active encounter cleared");
+
             set({ isLoading: false });
             return true;
           } catch (error: any) {
@@ -527,6 +671,13 @@ export const useGameStore = create<GameState>()(
               error: error.message || "Failed to clear active encounter",
               isLoading: false,
             });
+
+            // Add error notification
+            get().addNotification(
+              "error",
+              `Failed to clear active encounter: ${error.message}`
+            );
+
             return false;
           }
         },
@@ -563,7 +714,13 @@ export const useGameStore = create<GameState>()(
             );
 
             // Refresh images
-            await get().fetchImages(campaignId);
+            const images = await get().fetchImages(campaignId);
+
+            // Add success notification
+            get().addNotification(
+              "success",
+              `Image "${metadata.name}" uploaded successfully`
+            );
 
             set({ isLoading: false });
             return result;
@@ -572,6 +729,13 @@ export const useGameStore = create<GameState>()(
               error: error.message || "Failed to upload image",
               isLoading: false,
             });
+
+            // Add error notification
+            get().addNotification(
+              "error",
+              `Failed to upload image: ${error.message}`
+            );
+
             return null;
           }
         },
@@ -579,6 +743,11 @@ export const useGameStore = create<GameState>()(
         deleteImage: async (campaignId: string, imageId: string) => {
           set({ isLoading: true, error: null });
           try {
+            // Find image name before deleting
+            const imageName =
+              get().campaignImages.find((img) => img.id === imageId)?.name ||
+              "Image";
+
             await campaignsAPI.deleteImage(campaignId, imageId);
 
             // Update images list
@@ -592,12 +761,25 @@ export const useGameStore = create<GameState>()(
               isLoading: false,
             }));
 
+            // Add success notification
+            get().addNotification(
+              "success",
+              `Image "${imageName}" deleted successfully`
+            );
+
             return true;
           } catch (error: any) {
             set({
               error: error.message || "Failed to delete image",
               isLoading: false,
             });
+
+            // Add error notification
+            get().addNotification(
+              "error",
+              `Failed to delete image: ${error.message}`
+            );
+
             return false;
           }
         },
@@ -628,18 +810,33 @@ export const useGameStore = create<GameState>()(
               isLoading: false,
             }));
 
+            // Add success notification
+            get().addNotification("success", "Image updated successfully");
+
             return result;
           } catch (error: any) {
             set({
               error: error.message || "Failed to update image metadata",
               isLoading: false,
             });
+
+            // Add error notification
+            get().addNotification(
+              "error",
+              `Failed to update image: ${error.message}`
+            );
+
             return null;
           }
         },
 
         setActiveMap: (image: Image | null) => {
           set({ activeMap: image });
+
+          if (image) {
+            // Add info notification
+            get().addNotification("info", `Active map set to "${image.name}"`);
+          }
         },
 
         shareImage: async (campaignId: string, imageId: string) => {
@@ -647,8 +844,16 @@ export const useGameStore = create<GameState>()(
           try {
             await campaignsAPI.shareImage(campaignId, imageId);
 
+            // Find image name
+            const imageName =
+              get().campaignImages.find((img) => img.id === imageId)?.name ||
+              "Image";
+
             // Add notification
-            get().addNotification("info", "Image shared with players");
+            get().addNotification(
+              "success",
+              `Image "${imageName}" shared with players`
+            );
 
             set({ isLoading: false });
             return true;
@@ -657,6 +862,13 @@ export const useGameStore = create<GameState>()(
               error: error.message || "Failed to share image",
               isLoading: false,
             });
+
+            // Add error notification
+            get().addNotification(
+              "error",
+              `Failed to share image: ${error.message}`
+            );
+
             return false;
           }
         },
@@ -709,9 +921,28 @@ export const useGameStore = create<GameState>()(
 
           // Add notification if someone else locked a resource
           if (lock.lockedBy !== get().currentUser?.id) {
+            // Get resource type for better notification
+            let resourceTypeName = "";
+            switch (lock.resourceType) {
+              case "character":
+                resourceTypeName = "Character";
+                break;
+              case "npc":
+                resourceTypeName = "NPC";
+                break;
+              case "encounter":
+                resourceTypeName = "Encounter";
+                break;
+              case "combat":
+                resourceTypeName = "Combat";
+                break;
+              default:
+                resourceTypeName = lock.resourceType;
+            }
+
             get().addNotification(
               "info",
-              `${lock.resourceType} is being edited by another user`
+              `${resourceTypeName} is being edited by another user`
             );
           }
         },
@@ -743,6 +974,15 @@ export const useGameStore = create<GameState>()(
           return lock.lockedBy !== userId;
         },
 
+        getResourceLocker: (resourceType: string, resourceId: string) => {
+          const lock = get().resourceLocks.find(
+            (l) =>
+              l.resourceType === resourceType && l.resourceId === resourceId
+          );
+
+          return lock ? lock.lockedBy : null;
+        },
+
         toggleSidebar: () => {
           set((state) => ({ sidebarOpen: !state.sidebarOpen }));
         },
@@ -753,7 +993,10 @@ export const useGameStore = create<GameState>()(
           set({ selectedTab: tab });
         },
 
-        addNotification: (type: string, message: string) => {
+        addNotification: (
+          type: "info" | "success" | "warning" | "error",
+          message: string
+        ) => {
           const id = Date.now().toString();
           set((state) => ({
             notifications: [
@@ -795,7 +1038,38 @@ export const useGameStore = create<GameState>()(
           }
         },
 
+        loadUserData: async () => {
+          // Called after login to load all user data
+          set({ isLoading: true });
+
+          try {
+            // Fetch campaigns
+            await get().fetchCampaigns();
+
+            // If there are campaigns, select the first one
+            const { campaigns } = get();
+            if (campaigns.length > 0) {
+              const campaign = await get().fetchCampaign(campaigns[0]._id);
+              if (campaign) {
+                get().setCurrentCampaign(campaign);
+              }
+            }
+
+            set({ isLoading: false });
+          } catch (error: any) {
+            set({
+              error: error.message || "Failed to load user data",
+              isLoading: false,
+            });
+            get().addNotification("error", "Failed to load user data");
+          }
+        },
+
         resetState: () => {
+          // Stop any active timers from combat
+          const combatStore = useCombatStore.getState();
+          combatStore.resetTurnTimer();
+
           set({
             // Don't reset user or campaign list
             currentCampaign: null,
@@ -830,29 +1104,24 @@ export const useGameStore = create<GameState>()(
   )
 );
 
-// Setup store connections
-// This connects the game store to the character and combat stores
-// to keep them in sync with campaign changes
-const setupStoreConnections = () => {
-  // Subscribe to campaign changes
-  useGameStore.subscribe(
-    (state) => state.currentCampaign,
-    (campaign) => {
-      if (campaign) {
-        // Update character store with campaign characters
-        // Simplified example - in a real app, you might do more
-        const characterStore = useCharacterStore.getState();
-        characterStore.fetchCharacters(campaign._id);
+// Setup store connections for real-time updates
+useGameStore.subscribe(
+  (state) => state.currentCampaign,
+  (campaign) => {
+    if (campaign) {
+      // Ensure character store has the latest character data
+      const characterStore = useCharacterStore.getState();
+      characterStore.fetchCharacters(campaign._id);
 
-        // Update combat store with active combat if any
-        const combatStore = useCombatStore.getState();
-        combatStore.fetchActiveCombat(campaign._id);
-      }
+      // Ensure NPC store has the latest NPC data
+      const npcStore = useNPCStore.getState();
+      npcStore.fetchNPCs(campaign._id);
+
+      // Ensure combat store has the active combat if any
+      const combatStore = useCombatStore.getState();
+      combatStore.fetchActiveCombat(campaign._id);
     }
-  );
-};
-
-// Setup connections when this module is imported
-setupStoreConnections();
+  }
+);
 
 export default useGameStore;
