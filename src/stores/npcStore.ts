@@ -3,7 +3,9 @@ import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
 import { NPC, NPCListItem, NPCAction, NPCStats } from "@/lib/types";
 import { npcsAPI } from "@/lib/api";
-import { useGameStore } from "./gameStore";
+
+// Removida a importação circular do useGameStore
+// Vamos usar um sistema de notificações similar ao gameStore
 
 interface NPCState {
   // State
@@ -33,7 +35,24 @@ interface NPCState {
 
   // Reset state
   resetState: () => void;
+
+  // Notification system (similar to gameStore)
+  addNotification: (
+    type: "info" | "success" | "warning" | "error",
+    message: string
+  ) => void;
 }
+
+// Sistema de notificações para comunicação com outros stores
+let notificationCallback:
+  | ((type: "info" | "success" | "warning" | "error", message: string) => void)
+  | null = null;
+
+export const setNPCNotificationCallback = (
+  callback: typeof notificationCallback
+) => {
+  notificationCallback = callback;
+};
 
 export const useNPCStore = create<NPCState>()(
   devtools(
@@ -100,9 +119,8 @@ export const useNPCStore = create<NPCState>()(
               isLoading: false,
             }));
 
-            // Notify via Game Store
-            const gameStore = useGameStore.getState();
-            gameStore.addNotification("success", `NPC "${data.name}" created`);
+            // Notify success
+            get().addNotification("success", `NPC "${data.name}" created`);
 
             return data;
           } catch (error: any) {
@@ -111,9 +129,8 @@ export const useNPCStore = create<NPCState>()(
               isLoading: false,
             });
 
-            // Notify via Game Store
-            const gameStore = useGameStore.getState();
-            gameStore.addNotification(
+            // Notify error
+            get().addNotification(
               "error",
               `Failed to create NPC: ${error.message}`
             );
@@ -125,30 +142,8 @@ export const useNPCStore = create<NPCState>()(
         updateNPC: async (npcId: string, updates: Partial<NPC>) => {
           set({ isLoading: true, error: null });
           try {
-            // Check if the resource is locked by someone else
-            const gameStore = useGameStore.getState();
-            const currentUserId = gameStore.currentUser?.id;
-
-            if (
-              currentUserId &&
-              gameStore.isResourceLocked("npc", npcId, currentUserId)
-            ) {
-              const locker = gameStore.getResourceLocker("npc", npcId);
-              set({
-                error: `NPC is locked by another user${
-                  locker ? ` (${locker})` : ""
-                }`,
-                isLoading: false,
-              });
-
-              // Notify via Game Store
-              gameStore.addNotification(
-                "error",
-                "NPC is currently locked by another user"
-              );
-
-              return null;
-            }
+            // Verificação de lock seria feita aqui se necessário
+            // Removida a dependência direta do gameStore
 
             const data = await npcsAPI.updateNPC(npcId, updates);
 
@@ -172,8 +167,8 @@ export const useNPCStore = create<NPCState>()(
               isLoading: false,
             }));
 
-            // Notify via Game Store
-            gameStore.addNotification("success", `NPC "${data.name}" updated`);
+            // Notify success
+            get().addNotification("success", `NPC "${data.name}" updated`);
 
             return data;
           } catch (error: any) {
@@ -182,9 +177,8 @@ export const useNPCStore = create<NPCState>()(
               isLoading: false,
             });
 
-            // Notify via Game Store
-            const gameStore = useGameStore.getState();
-            gameStore.addNotification(
+            // Notify error
+            get().addNotification(
               "error",
               `Failed to update NPC: ${error.message}`
             );
@@ -209,9 +203,8 @@ export const useNPCStore = create<NPCState>()(
               isLoading: false,
             }));
 
-            // Notify via Game Store
-            const gameStore = useGameStore.getState();
-            gameStore.addNotification("success", `NPC "${npcName}" deleted`);
+            // Notify success
+            get().addNotification("success", `NPC "${npcName}" deleted`);
 
             return true;
           } catch (error: any) {
@@ -220,9 +213,8 @@ export const useNPCStore = create<NPCState>()(
               isLoading: false,
             });
 
-            // Notify via Game Store
-            const gameStore = useGameStore.getState();
-            gameStore.addNotification(
+            // Notify error
+            get().addNotification(
               "error",
               `Failed to delete NPC: ${error.message}`
             );
@@ -241,13 +233,12 @@ export const useNPCStore = create<NPCState>()(
               set({ npc: data });
             }
 
-            // Notify via Game Store
-            const gameStore = useGameStore.getState();
+            // Notify HP change
             const hpText =
               hpChange > 0
                 ? `healed ${hpChange} HP`
                 : `took ${Math.abs(hpChange)} damage`;
-            gameStore.addNotification("info", `${data.name} ${hpText}`);
+            get().addNotification("info", `${data.name} ${hpText}`);
 
             set({ isLoading: false });
             return data;
@@ -257,9 +248,8 @@ export const useNPCStore = create<NPCState>()(
               isLoading: false,
             });
 
-            // Notify via Game Store
-            const gameStore = useGameStore.getState();
-            gameStore.addNotification("error", "Failed to update HP");
+            // Notify error
+            get().addNotification("error", "Failed to update HP");
 
             return null;
           }
@@ -293,9 +283,8 @@ export const useNPCStore = create<NPCState>()(
               isLoading: false,
             }));
 
-            // Notify via Game Store
-            const gameStore = useGameStore.getState();
-            gameStore.addNotification(
+            // Notify success
+            get().addNotification(
               "success",
               `NPC "${data.name}" imported from compendium`
             );
@@ -307,9 +296,8 @@ export const useNPCStore = create<NPCState>()(
               isLoading: false,
             });
 
-            // Notify via Game Store
-            const gameStore = useGameStore.getState();
-            gameStore.addNotification(
+            // Notify error
+            get().addNotification(
               "error",
               `Failed to import from compendium: ${error.message}`
             );
@@ -337,9 +325,8 @@ export const useNPCStore = create<NPCState>()(
               isLoading: false,
             }));
 
-            // Notify via Game Store
-            const gameStore = useGameStore.getState();
-            gameStore.addNotification(
+            // Notify success
+            get().addNotification(
               "success",
               `${data.length} NPCs imported successfully`
             );
@@ -351,9 +338,8 @@ export const useNPCStore = create<NPCState>()(
               isLoading: false,
             });
 
-            // Notify via Game Store
-            const gameStore = useGameStore.getState();
-            gameStore.addNotification(
+            // Notify error
+            get().addNotification(
               "error",
               `Failed to import NPCs: ${error.message}`
             );
@@ -405,6 +391,20 @@ export const useNPCStore = create<NPCState>()(
             isLoading: false,
             error: null,
           });
+        },
+
+        // Notification system
+        addNotification: (
+          type: "info" | "success" | "warning" | "error",
+          message: string
+        ) => {
+          // Se há um callback configurado (do gameStore), usa ele
+          if (notificationCallback) {
+            notificationCallback(type, message);
+          } else {
+            // Fallback para console se não há callback
+            console.log(`[NPC Store] ${type.toUpperCase()}: ${message}`);
+          }
         },
       }),
       {

@@ -6,14 +6,14 @@ import {
   CampaignListItem,
   Encounter,
   Image,
-  Character,
-  NPC,
   User,
 } from "@/lib/types";
 import { campaignsAPI } from "@/lib/api";
-import { useCharacterStore } from "./characterStore";
-import { useCombatStore } from "./combatStore";
-import { useNPCStore } from "./npcStore";
+
+// Removidas as importações circulares que causavam problemas
+// import { useCharacterStore } from "./characterStore";
+// import { useCombatStore } from "./combatStore";
+// import { useNPCStore } from "./npcStore";
 
 interface WebSocketConnectionStatus {
   connected: boolean;
@@ -151,7 +151,14 @@ interface GameState {
   setCurrentUser: (user: User | null) => void;
   resetState: () => void;
   loadUserData: () => Promise<void>;
+
+  // Store communication - for other stores to subscribe to changes
+  onCampaignChange: (callback: (campaign: Campaign | null) => void) => void;
+  offCampaignChange: (callback: (campaign: Campaign | null) => void) => void;
 }
+
+// Callbacks para comunicação entre stores
+const campaignChangeCallbacks: Array<(campaign: Campaign | null) => void> = [];
 
 export const useGameStore = create<GameState>()(
   devtools(
@@ -215,11 +222,13 @@ export const useGameStore = create<GameState>()(
         },
 
         setCurrentCampaign: (campaign: Campaign | null) => {
+          const previousCampaign = get().currentCampaign;
+
           set({ currentCampaign: campaign });
 
           // Check if user is the DM
           if (campaign && get().currentUser) {
-            const isDM = campaign.dm_id === get().currentUser.id;
+            const isDM = campaign.dm_id === get().currentUser!.id;
             set({ isUserDM: isDM });
           } else {
             set({ isUserDM: false });
@@ -228,22 +237,21 @@ export const useGameStore = create<GameState>()(
           // Reset active map when changing campaigns
           set({ activeMap: null });
 
-          // Connect to relevant data sources
+          // Load campaign images if we have a campaign
           if (campaign) {
-            // Load campaign images
             get().fetchImages(campaign._id);
+          }
 
-            // Load characters for the campaign
-            const characterStore = useCharacterStore.getState();
-            characterStore.fetchCharacters(campaign._id);
-
-            // Load NPCs for the campaign
-            const npcStore = useNPCStore.getState();
-            npcStore.fetchNPCs(campaign._id);
-
-            // Check for active combat
-            const combatStore = useCombatStore.getState();
-            combatStore.fetchActiveCombat(campaign._id);
+          // Notify other stores about campaign change
+          // Removida a chamada direta dos stores - agora usa callbacks
+          if (campaign !== previousCampaign) {
+            campaignChangeCallbacks.forEach((callback) => {
+              try {
+                callback(campaign);
+              } catch (error) {
+                console.error("Error in campaign change callback:", error);
+              }
+            });
           }
         },
 
@@ -261,7 +269,7 @@ export const useGameStore = create<GameState>()(
           try {
             const campaignData = {
               ...data,
-              dm_id: get().currentUser.id,
+              dm_id: get().currentUser!.id,
             };
 
             const campaign = await campaignsAPI.createCampaign(campaignData);
@@ -714,7 +722,7 @@ export const useGameStore = create<GameState>()(
             );
 
             // Refresh images
-            const images = await get().fetchImages(campaignId);
+            await get().fetchImages(campaignId);
 
             // Add success notification
             get().addNotification(
@@ -997,7 +1005,7 @@ export const useGameStore = create<GameState>()(
           type: "info" | "success" | "warning" | "error",
           message: string
         ) => {
-          const id = Date.now().toString();
+          const id = Date.now().toString() + Math.random().toString(36);
           set((state) => ({
             notifications: [
               ...state.notifications,
@@ -1066,10 +1074,6 @@ export const useGameStore = create<GameState>()(
         },
 
         resetState: () => {
-          // Stop any active timers from combat
-          const combatStore = useCombatStore.getState();
-          combatStore.resetTurnTimer();
-
           set({
             // Don't reset user or campaign list
             currentCampaign: null,
@@ -1089,6 +1093,18 @@ export const useGameStore = create<GameState>()(
             error: null,
           });
         },
+
+        // Store communication functions
+        onCampaignChange: (callback: (campaign: Campaign | null) => void) => {
+          campaignChangeCallbacks.push(callback);
+        },
+
+        offCampaignChange: (callback: (campaign: Campaign | null) => void) => {
+          const index = campaignChangeCallbacks.indexOf(callback);
+          if (index > -1) {
+            campaignChangeCallbacks.splice(index, 1);
+          }
+        },
       }),
       {
         name: "game-store",
@@ -1102,26 +1118,6 @@ export const useGameStore = create<GameState>()(
       }
     )
   )
-);
-
-// Setup store connections for real-time updates
-useGameStore.subscribe(
-  (state) => state.currentCampaign,
-  (campaign) => {
-    if (campaign) {
-      // Ensure character store has the latest character data
-      const characterStore = useCharacterStore.getState();
-      characterStore.fetchCharacters(campaign._id);
-
-      // Ensure NPC store has the latest NPC data
-      const npcStore = useNPCStore.getState();
-      npcStore.fetchNPCs(campaign._id);
-
-      // Ensure combat store has the active combat if any
-      const combatStore = useCombatStore.getState();
-      combatStore.fetchActiveCombat(campaign._id);
-    }
-  }
 );
 
 export default useGameStore;

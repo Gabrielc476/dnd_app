@@ -2,18 +2,25 @@
 export { useCharacterStore } from "./characterStore";
 export { useCombatStore } from "./combatStore";
 export { useGameStore } from "./gameStore";
+export { useNPCStore } from "./npcStore";
+export {
+  initializeStoreConnections,
+  cleanupStoreConnections,
+  useStoreSync,
+} from "./storeConnections";
 
-// Define a StoreProvider for convenience in server components
-// or components that need access to multiple stores
-import React, { createContext, useContext, ReactNode } from "react";
+import React, { createContext, useContext, ReactNode, useEffect } from "react";
 import { useCharacterStore } from "./characterStore";
 import { useCombatStore } from "./combatStore";
 import { useGameStore } from "./gameStore";
+import { useNPCStore } from "./npcStore";
+import { initializeStoreConnections } from "./storeConnections";
 
 interface StoreContextType {
-  characterStore: ReturnType<typeof useCharacterStore.getState>;
-  combatStore: ReturnType<typeof useCombatStore.getState>;
-  gameStore: ReturnType<typeof useGameStore.getState>;
+  characterStore: ReturnType<typeof useCharacterStore>;
+  combatStore: ReturnType<typeof useCombatStore>;
+  gameStore: ReturnType<typeof useGameStore>;
+  npcStore: ReturnType<typeof useNPCStore>;
 }
 
 const StoreContext = createContext<StoreContextType | null>(null);
@@ -21,10 +28,16 @@ const StoreContext = createContext<StoreContextType | null>(null);
 export const StoreProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
-  // Get store states
-  const characterStore = useCharacterStore.getState();
-  const combatStore = useCombatStore.getState();
-  const gameStore = useGameStore.getState();
+  // Get store hooks (not state)
+  const characterStore = useCharacterStore();
+  const combatStore = useCombatStore();
+  const gameStore = useGameStore();
+  const npcStore = useNPCStore();
+
+  // Initialize store connections once
+  useEffect(() => {
+    initializeStoreConnections();
+  }, []);
 
   return (
     <StoreContext.Provider
@@ -32,6 +45,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({
         characterStore,
         combatStore,
         gameStore,
+        npcStore,
       }}
     >
       {children}
@@ -39,10 +53,19 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({
   );
 };
 
-export const useStore = () => {
+export const useStores = () => {
   const context = useContext(StoreContext);
   if (!context) {
-    throw new Error("useStore must be used within a StoreProvider");
+    throw new Error("useStores must be used within a StoreProvider");
   }
   return context;
+};
+
+// Função utilitária para inicializar todos os stores na aplicação
+export const initializeStores = () => {
+  // Inicializar conexões entre stores
+  initializeStoreConnections();
+
+  // Aqui você pode adicionar outras inicializações necessárias
+  console.log("Stores initialized successfully");
 };
