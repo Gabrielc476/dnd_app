@@ -47,6 +47,12 @@ interface CharacterState {
   getModifier: (characterId: string, attribute: string) => number;
   getProficiencyBonus: (characterId: string) => number;
 
+  // Helper functions
+  getCharacterById: (
+    characterId: string
+  ) => Character | CharacterListItem | null;
+  isCurrentCharacter: (characterId: string) => boolean;
+
   // Reset state
   resetState: () => void;
 }
@@ -61,6 +67,36 @@ export const useCharacterStore = create<CharacterState>()(
         isLoading: false,
         error: null,
         lockedResources: {},
+
+        // Helper functions
+        getCharacterById: (characterId: string) => {
+          const state = get();
+
+          // Check if it's the current character first
+          if (
+            state.currentCharacter &&
+            state.currentCharacter._id === characterId
+          ) {
+            return state.currentCharacter;
+          }
+
+          // Look in the characters list (limited data)
+          const characterListItem = state.characters.find(
+            (c) => c._id === characterId
+          );
+          if (characterListItem) {
+            return characterListItem;
+          }
+
+          return null;
+        },
+
+        isCurrentCharacter: (characterId: string) => {
+          const currentCharacter = get().currentCharacter;
+          return (
+            currentCharacter !== null && currentCharacter._id === characterId
+          );
+        },
 
         // Actions
         fetchCharacters: async (campaignId?: string) => {
@@ -117,28 +153,29 @@ export const useCharacterStore = create<CharacterState>()(
               updates
             );
 
-            if (
-              get().currentCharacter &&
-              get().currentCharacter._id === characterId
-            ) {
+            // Update current character if it matches
+            const isCurrentChar = get().isCurrentCharacter(characterId);
+            if (isCurrentChar) {
               set({ currentCharacter: updatedCharacter });
             }
 
-            // Update the character in the list (only basic info)
-            const updatedCharacters = get().characters.map((char) =>
-              char._id === characterId
-                ? {
-                    ...char,
-                    name: updates.name || char.name,
-                    level: updates.level || char.level,
-                    race: updates.race || char.race,
-                    class: updates.class || char.class,
-                    hp: updates.hp || char.hp,
-                  }
-                : char
-            );
+            // Update the character in the list (only basic info that exists in CharacterListItem)
+            set((state) => ({
+              characters: state.characters.map((char) =>
+                char._id === characterId
+                  ? {
+                      ...char,
+                      name: updates.name || char.name,
+                      level: updates.level || char.level,
+                      race: updates.race || char.race,
+                      class: updates.class || char.class,
+                      hp: updates.hp || char.hp,
+                    }
+                  : char
+              ),
+              isLoading: false,
+            }));
 
-            set({ characters: updatedCharacters, isLoading: false });
             return true;
           } catch (error: any) {
             set({
@@ -188,13 +225,14 @@ export const useCharacterStore = create<CharacterState>()(
           try {
             await charactersAPI.deleteCharacter(characterId);
 
-            // Remove from character list
+            // Remove from character list and clear current character if it matches
             set((state) => ({
               characters: state.characters.filter(
                 (char) => char._id !== characterId
               ),
               currentCharacter:
-                state.currentCharacter?._id === characterId
+                state.currentCharacter &&
+                state.currentCharacter._id === characterId
                   ? null
                   : state.currentCharacter,
               isLoading: false,
@@ -223,26 +261,26 @@ export const useCharacterStore = create<CharacterState>()(
               isTemp
             );
 
-            // Update current character if it's the same one
-            if (
-              get().currentCharacter &&
-              get().currentCharacter._id === characterId
-            ) {
+            // Update current character if it matches
+            const isCurrentChar = get().isCurrentCharacter(characterId);
+            if (isCurrentChar) {
               set({ currentCharacter: updatedCharacter });
             }
 
             // Update character in list (only update hp field which exists in CharacterListItem)
-            const updatedCharacters = get().characters.map((char) => {
-              if (char._id === characterId && !isTemp) {
-                return {
-                  ...char,
-                  hp: updatedCharacter.hp,
-                };
-              }
-              return char;
-            });
+            if (!isTemp) {
+              set((state) => ({
+                characters: state.characters.map((char) =>
+                  char._id === characterId
+                    ? { ...char, hp: updatedCharacter.hp }
+                    : char
+                ),
+                isLoading: false,
+              }));
+            } else {
+              set({ isLoading: false });
+            }
 
-            set({ characters: updatedCharacters, isLoading: false });
             return true;
           } catch (error: any) {
             set({
@@ -261,11 +299,9 @@ export const useCharacterStore = create<CharacterState>()(
               condition
             );
 
-            // Update current character if it's the same one
-            if (
-              get().currentCharacter &&
-              get().currentCharacter._id === characterId
-            ) {
+            // Update current character if it matches
+            const isCurrentChar = get().isCurrentCharacter(characterId);
+            if (isCurrentChar) {
               set({ currentCharacter: updatedCharacter });
             }
 
@@ -288,11 +324,9 @@ export const useCharacterStore = create<CharacterState>()(
               condition
             );
 
-            // Update current character if it's the same one
-            if (
-              get().currentCharacter &&
-              get().currentCharacter._id === characterId
-            ) {
+            // Update current character if it matches
+            const isCurrentChar = get().isCurrentCharacter(characterId);
+            if (isCurrentChar) {
               set({ currentCharacter: updatedCharacter });
             }
 
@@ -336,22 +370,37 @@ export const useCharacterStore = create<CharacterState>()(
           advantage = false,
           disadvantage = false
         ) => {
-          // First check if we have the full character loaded
+          // Get character data - first check if it's current, then fetch if needed
           let character: Character | null = null;
 
-          if (get().currentCharacter?._id === characterId) {
-            character = get().currentCharacter;
+          const state = get();
+          if (
+            state.currentCharacter &&
+            state.currentCharacter._id === characterId
+          ) {
+            character = state.currentCharacter;
           } else {
             // Need to fetch the full character data
             character = await get().fetchCharacter(characterId);
           }
 
-          if (!character) return 0;
+          if (!character) {
+            console.warn(
+              `Character ${characterId} not found for initiative roll`
+            );
+            return 0;
+          }
 
           // Calculate initiative modifier
           let initiativeBonus = character.initiative_bonus || 0;
-          const dexMod = Math.floor((character.attributes.dexterity - 10) / 2);
-          initiativeBonus += dexMod;
+
+          // Add dexterity modifier if attributes exist
+          if (character.attributes && character.attributes.dexterity) {
+            const dexMod = Math.floor(
+              (character.attributes.dexterity - 10) / 2
+            );
+            initiativeBonus += dexMod;
+          }
 
           // Simulate dice roll (should use WebSocket in production)
           const roll1 = Math.floor(Math.random() * 20) + 1;
@@ -370,42 +419,35 @@ export const useCharacterStore = create<CharacterState>()(
         },
 
         getModifier: (characterId: string, attribute: string) => {
-          // Only use currentCharacter if it matches the requested ID
-          const character =
-            get().currentCharacter?._id === characterId
-              ? get().currentCharacter
-              : null;
+          const character = get().getCharacterById(characterId);
 
+          // Only full Character objects have attributes, not CharacterListItem
           if (
             !character ||
-            !character.attributes ||
-            !(attribute in character.attributes)
+            !("attributes" in character) ||
+            !character.attributes
           ) {
             return 0;
           }
 
-          const attrValue =
-            character.attributes[
-              attribute as keyof typeof character.attributes
-            ];
+          const attributes = character.attributes;
+          if (!(attribute in attributes)) {
+            return 0;
+          }
+
+          const attrValue = attributes[attribute as keyof typeof attributes];
           return Math.floor((attrValue - 10) / 2);
         },
 
         getProficiencyBonus: (characterId: string) => {
-          // Check if currentCharacter matches the requested ID
-          if (get().currentCharacter?._id === characterId) {
-            return getProficiencyBonus(get().currentCharacter.level);
+          const character = get().getCharacterById(characterId);
+
+          if (!character) {
+            return 2; // Default for level 1
           }
 
-          // Try to find in the character list (but we only have basic info)
-          const characterListItem = get().characters.find(
-            (c) => c._id === characterId
-          );
-          if (characterListItem) {
-            return getProficiencyBonus(characterListItem.level);
-          }
-
-          return 2; // Default for level 1
+          // Both Character and CharacterListItem have level
+          return getProficiencyBonus(character.level);
         },
 
         // Reset state
