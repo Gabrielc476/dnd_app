@@ -112,15 +112,6 @@ export const useCharacterStore = create<CharacterState>()(
         ) => {
           set({ isLoading: true, error: null });
           try {
-            // Check if the resource is locked by someone else
-            if (get().isResourceLocked(characterId, "current-user-id")) {
-              set({
-                error: "Character is locked by another user",
-                isLoading: false,
-              });
-              return false;
-            }
-
             const updatedCharacter = await charactersAPI.updateCharacter(
               characterId,
               updates
@@ -133,9 +124,18 @@ export const useCharacterStore = create<CharacterState>()(
               set({ currentCharacter: updatedCharacter });
             }
 
-            // Update the character in the list
+            // Update the character in the list (only basic info)
             const updatedCharacters = get().characters.map((char) =>
-              char._id === characterId ? { ...char, ...updates } : char
+              char._id === characterId
+                ? {
+                    ...char,
+                    name: updates.name || char.name,
+                    level: updates.level || char.level,
+                    race: updates.race || char.race,
+                    class: updates.class || char.class,
+                    hp: updates.hp || char.hp,
+                  }
+                : char
             );
 
             set({ characters: updatedCharacters, isLoading: false });
@@ -231,9 +231,9 @@ export const useCharacterStore = create<CharacterState>()(
               set({ currentCharacter: updatedCharacter });
             }
 
-            // Update character in list
+            // Update character in list (only update hp field which exists in CharacterListItem)
             const updatedCharacters = get().characters.map((char) => {
-              if (char._id === characterId) {
+              if (char._id === characterId && !isTemp) {
                 return {
                   ...char,
                   hp: updatedCharacter.hp,
@@ -336,10 +336,15 @@ export const useCharacterStore = create<CharacterState>()(
           advantage = false,
           disadvantage = false
         ) => {
-          const character =
-            get().currentCharacter ||
-            get().characters.find((c) => c._id === characterId) ||
-            (await get().fetchCharacter(characterId));
+          // First check if we have the full character loaded
+          let character: Character | null = null;
+
+          if (get().currentCharacter?._id === characterId) {
+            character = get().currentCharacter;
+          } else {
+            // Need to fetch the full character data
+            character = await get().fetchCharacter(characterId);
+          }
 
           if (!character) return 0;
 
@@ -365,9 +370,11 @@ export const useCharacterStore = create<CharacterState>()(
         },
 
         getModifier: (characterId: string, attribute: string) => {
+          // Only use currentCharacter if it matches the requested ID
           const character =
-            get().currentCharacter ||
-            get().characters.find((c) => c._id === characterId);
+            get().currentCharacter?._id === characterId
+              ? get().currentCharacter
+              : null;
 
           if (
             !character ||
@@ -385,13 +392,20 @@ export const useCharacterStore = create<CharacterState>()(
         },
 
         getProficiencyBonus: (characterId: string) => {
-          const character =
-            get().currentCharacter ||
-            get().characters.find((c) => c._id === characterId);
+          // Check if currentCharacter matches the requested ID
+          if (get().currentCharacter?._id === characterId) {
+            return getProficiencyBonus(get().currentCharacter.level);
+          }
 
-          if (!character) return 2; // Default for level 1
+          // Try to find in the character list (but we only have basic info)
+          const characterListItem = get().characters.find(
+            (c) => c._id === characterId
+          );
+          if (characterListItem) {
+            return getProficiencyBonus(characterListItem.level);
+          }
 
-          return getProficiencyBonus(character.level);
+          return 2; // Default for level 1
         },
 
         // Reset state

@@ -132,15 +132,15 @@ export const useCombatStore = create<CombatState>()(
         }
 
         return combat;
-      } catch (error: any) {
+      } catch (err: any) {
         // If 404, it means there's no active combat
-        if (error.message && error.message.includes("404")) {
+        if (err.message && err.message.includes("404")) {
           set({ activeCombat: null, isLoading: false });
           return null;
         }
 
         set({
-          error: error.message || "Failed to fetch active combat",
+          error: err.message || "Failed to fetch active combat",
           isLoading: false,
         });
         return null;
@@ -153,15 +153,16 @@ export const useCombatStore = create<CombatState>()(
         const combat = await combatAPI.getCombat(combatId);
 
         // If this is the active combat, update that reference
-        if (get().activeCombat && get().activeCombat._id === combatId) {
+        const currentActiveCombat = get().activeCombat;
+        if (currentActiveCombat && currentActiveCombat._id === combatId) {
           set({ activeCombat: combat });
         }
 
         set({ isLoading: false });
         return combat;
-      } catch (error: any) {
+      } catch (err: any) {
         set({
-          error: error.message || "Failed to fetch combat",
+          error: err.message || "Failed to fetch combat",
           isLoading: false,
         });
         return null;
@@ -190,9 +191,9 @@ export const useCombatStore = create<CombatState>()(
         gameStore.addNotification("success", "Combat started");
 
         return combat;
-      } catch (error: any) {
+      } catch (err: any) {
         set({
-          error: error.message || "Failed to start combat",
+          error: err.message || "Failed to start combat",
           isLoading: false,
         });
         return null;
@@ -205,7 +206,8 @@ export const useCombatStore = create<CombatState>()(
         await combatAPI.endCombat(combatId);
 
         // Add to combat history if this was the active combat
-        if (get().activeCombat && get().activeCombat._id === combatId) {
+        const currentActiveCombat = get().activeCombat;
+        if (currentActiveCombat && currentActiveCombat._id === combatId) {
           set((state) => ({
             combatHistory: [
               ...(state.activeCombat ? [state.activeCombat] : []),
@@ -224,9 +226,9 @@ export const useCombatStore = create<CombatState>()(
 
         set({ isLoading: false });
         return true;
-      } catch (error: any) {
+      } catch (err: any) {
         set({
-          error: error.message || "Failed to end combat",
+          error: err.message || "Failed to end combat",
           isLoading: false,
         });
         return false;
@@ -251,8 +253,8 @@ export const useCombatStore = create<CombatState>()(
           const modifier = get().getInitiativeModifier(entityId, entityType);
 
           // Roll initiative with appropriate advantage/disadvantage
-          let roll1 = Math.floor(Math.random() * 20) + 1;
-          let roll2 = Math.floor(Math.random() * 20) + 1;
+          const roll1 = Math.floor(Math.random() * 20) + 1;
+          const roll2 = Math.floor(Math.random() * 20) + 1;
 
           if (advantage && !disadvantage) {
             initiativeValue = Math.max(roll1, roll2) + modifier;
@@ -293,9 +295,9 @@ export const useCombatStore = create<CombatState>()(
 
         set({ isLoading: false });
         return success;
-      } catch (error: any) {
+      } catch (err: any) {
         set({
-          error: error.message || "Failed to roll initiative",
+          error: err.message || "Failed to roll initiative",
           isLoading: false,
         });
         return false;
@@ -334,7 +336,7 @@ export const useCombatStore = create<CombatState>()(
               entityType as "character" | "npc",
               initiative
             );
-          } catch (error) {
+          } catch (_) {
             return false;
           }
         }
@@ -383,9 +385,9 @@ export const useCombatStore = create<CombatState>()(
 
         set({ isLoading: false });
         return success;
-      } catch (error: any) {
+      } catch (err: any) {
         set({
-          error: error.message || "Failed to advance turn",
+          error: err.message || "Failed to advance turn",
           isLoading: false,
         });
         return false;
@@ -430,9 +432,9 @@ export const useCombatStore = create<CombatState>()(
 
         set({ isLoading: false });
         return success;
-      } catch (error: any) {
+      } catch (err: any) {
         set({
-          error: error.message || "Failed to add condition",
+          error: err.message || "Failed to add condition",
           isLoading: false,
         });
         return false;
@@ -455,9 +457,9 @@ export const useCombatStore = create<CombatState>()(
 
         set({ isLoading: false });
         return success;
-      } catch (error: any) {
+      } catch (err: any) {
         set({
-          error: error.message || "Failed to remove condition",
+          error: err.message || "Failed to remove condition",
           isLoading: false,
         });
         return false;
@@ -513,9 +515,9 @@ export const useCombatStore = create<CombatState>()(
 
         set({ isLoading: false });
         return false;
-      } catch (error: any) {
+      } catch (err: any) {
         set({
-          error: error.message || "Failed to register action",
+          error: err.message || "Failed to register action",
           isLoading: false,
         });
         return false;
@@ -591,6 +593,10 @@ export const useCombatStore = create<CombatState>()(
       }
 
       const currentTurn = activeCombat.current_turn;
+      if (currentTurn >= activeCombat.initiative_order.length) {
+        return null;
+      }
+
       const entity = activeCombat.initiative_order[currentTurn];
 
       return {
@@ -638,7 +644,7 @@ export const useCombatStore = create<CombatState>()(
 
     isPlayerTurn: (userId: string) => {
       const { activeCombat } = get();
-      if (!activeCombat) return false;
+      if (!activeCombat || !activeCombat.initiative_order.length) return false;
 
       const currentTurn = activeCombat.current_turn;
       if (currentTurn >= activeCombat.initiative_order.length) return false;
@@ -683,7 +689,7 @@ export const useCombatStore = create<CombatState>()(
       entityType: "character" | "npc"
     ) => {
       const { activeCombat } = get();
-      if (!activeCombat) return [];
+      if (!activeCombat || !activeCombat.conditions) return [];
 
       return activeCombat.conditions.filter(
         (condition) =>
