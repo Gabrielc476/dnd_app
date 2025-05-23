@@ -1,10 +1,15 @@
-// store/storeConnections.ts
-// Este arquivo estabelece conexões seguras entre os stores sem dependências circulares
-
+// src/stores/storeConnections.ts
 import { useGameStore } from "./gameStore";
-import { useCharacterStore } from "./characterStore";
-import { useCombatStore } from "./combatStore";
-import { useNPCStore } from "./npcStore"; // Quando implementado
+import {
+  useCharacterStore,
+  setCharacterNotificationCallback,
+} from "./characterStore";
+import {
+  useCombatStore,
+  setCombatNotificationCallback,
+  setCombatDataCallbacks,
+} from "./combatStore";
+import { useNPCStore, setNPCNotificationCallback } from "./npcStore";
 
 /**
  * Inicializa as conexões entre stores
@@ -12,6 +17,28 @@ import { useNPCStore } from "./npcStore"; // Quando implementado
  */
 export function initializeStoreConnections() {
   const gameStore = useGameStore.getState();
+
+  // Configure notification callbacks para todos os stores usarem o gameStore
+  const notificationCallback = gameStore.addNotification;
+
+  setCharacterNotificationCallback(notificationCallback);
+  setCombatNotificationCallback(notificationCallback);
+  setNPCNotificationCallback(notificationCallback);
+
+  // Configure data callbacks para o combat store
+  const getCharacterCallback = (characterId: string) => {
+    const characterStore = useCharacterStore.getState();
+    const character = characterStore.getCharacterById(characterId);
+    return character ? { name: character.name } : null;
+  };
+
+  const getNPCCallback = (npcId: string) => {
+    const npcStore = useNPCStore.getState();
+    const npc = npcStore.getNPCById(npcId);
+    return npc ? { name: npc.name } : null;
+  };
+
+  setCombatDataCallbacks(getCharacterCallback, getNPCCallback);
 
   // Conectar character store às mudanças de campanha
   gameStore.onCampaignChange((campaign) => {
@@ -39,6 +66,7 @@ export function initializeStoreConnections() {
     }
   });
 
+  // Conectar NPC store às mudanças de campanha
   gameStore.onCampaignChange((campaign) => {
     const npcStore = useNPCStore.getState();
 
@@ -55,7 +83,11 @@ export function initializeStoreConnections() {
  * Útil para cleanup ou testes
  */
 export function cleanupStoreConnections() {
-  // Se necessário implementar cleanup específico dos callbacks
+  // Limpar callbacks
+  setCharacterNotificationCallback(null);
+  setCombatNotificationCallback(null);
+  setNPCNotificationCallback(null);
+  setCombatDataCallbacks(null, null);
 }
 
 /**
@@ -65,12 +97,16 @@ export function useStoreSync() {
   const gameStore = useGameStore();
   const characterStore = useCharacterStore();
   const combatStore = useCombatStore();
+  const npcStore = useNPCStore();
 
   return {
     // Estado sincronizado
     currentCampaign: gameStore.currentCampaign,
     isLoading:
-      gameStore.isLoading || characterStore.isLoading || combatStore.isLoading,
+      gameStore.isLoading ||
+      characterStore.isLoading ||
+      combatStore.isLoading ||
+      npcStore.isLoading,
 
     // Ações que afetam múltiplos stores
     switchCampaign: async (campaignId: string) => {
@@ -86,6 +122,7 @@ export function useStoreSync() {
       gameStore.resetState();
       characterStore.resetState();
       combatStore.resetState();
+      npcStore.resetState();
     },
   };
 }

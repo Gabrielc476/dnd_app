@@ -1,4 +1,4 @@
-// store/characterStore.ts
+// src/stores/characterStore.ts
 import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
 import { Character, CharacterListItem } from "@/lib/types";
@@ -55,7 +55,24 @@ interface CharacterState {
 
   // Reset state
   resetState: () => void;
+
+  // Notification system
+  addNotification: (
+    type: "info" | "success" | "warning" | "error",
+    message: string
+  ) => void;
 }
+
+// Sistema de notificações para comunicação com outros stores
+let notificationCallback:
+  | ((type: "info" | "success" | "warning" | "error", message: string) => void)
+  | null = null;
+
+export const setCharacterNotificationCallback = (
+  callback: typeof notificationCallback
+) => {
+  notificationCallback = callback;
+};
 
 export const useCharacterStore = create<CharacterState>()(
   devtools(
@@ -176,12 +193,24 @@ export const useCharacterStore = create<CharacterState>()(
               isLoading: false,
             }));
 
+            // Notify success
+            get().addNotification(
+              "success",
+              `Character "${updatedCharacter.name}" updated`
+            );
+
             return true;
           } catch (error: any) {
             set({
               error: error.message || "Failed to update character",
               isLoading: false,
             });
+
+            // Notify error
+            get().addNotification(
+              "error",
+              `Failed to update character: ${error.message}`
+            );
             return false;
           }
         },
@@ -210,12 +239,24 @@ export const useCharacterStore = create<CharacterState>()(
               isLoading: false,
             }));
 
+            // Notify success
+            get().addNotification(
+              "success",
+              `Character "${newCharacter.name}" created`
+            );
+
             return newCharacter;
           } catch (error: any) {
             set({
               error: error.message || "Failed to create character",
               isLoading: false,
             });
+
+            // Notify error
+            get().addNotification(
+              "error",
+              `Failed to create character: ${error.message}`
+            );
             return null;
           }
         },
@@ -223,6 +264,10 @@ export const useCharacterStore = create<CharacterState>()(
         deleteCharacter: async (characterId: string) => {
           set({ isLoading: true, error: null });
           try {
+            // Get character name before deleting
+            const characterName =
+              get().getCharacterById(characterId)?.name || "Character";
+
             await charactersAPI.deleteCharacter(characterId);
 
             // Remove from character list and clear current character if it matches
@@ -238,12 +283,24 @@ export const useCharacterStore = create<CharacterState>()(
               isLoading: false,
             }));
 
+            // Notify success
+            get().addNotification(
+              "success",
+              `Character "${characterName}" deleted`
+            );
+
             return true;
           } catch (error: any) {
             set({
               error: error.message || "Failed to delete character",
               isLoading: false,
             });
+
+            // Notify error
+            get().addNotification(
+              "error",
+              `Failed to delete character: ${error.message}`
+            );
             return false;
           }
         },
@@ -281,12 +338,22 @@ export const useCharacterStore = create<CharacterState>()(
               set({ isLoading: false });
             }
 
+            // Notify HP change
+            const hpText =
+              hpChange > 0
+                ? `healed ${hpChange} HP`
+                : `took ${Math.abs(hpChange)} damage`;
+            get().addNotification("info", `${updatedCharacter.name} ${hpText}`);
+
             return true;
           } catch (error: any) {
             set({
               error: error.message || "Failed to update HP",
               isLoading: false,
             });
+
+            // Notify error
+            get().addNotification("error", "Failed to update HP");
             return false;
           }
         },
@@ -305,6 +372,12 @@ export const useCharacterStore = create<CharacterState>()(
               set({ currentCharacter: updatedCharacter });
             }
 
+            // Notify condition added
+            get().addNotification(
+              "info",
+              `Condition ${condition} applied to ${updatedCharacter.name}`
+            );
+
             set({ isLoading: false });
             return true;
           } catch (error: any) {
@@ -312,6 +385,9 @@ export const useCharacterStore = create<CharacterState>()(
               error: error.message || "Failed to add condition",
               isLoading: false,
             });
+
+            // Notify error
+            get().addNotification("error", "Failed to add condition");
             return false;
           }
         },
@@ -330,6 +406,12 @@ export const useCharacterStore = create<CharacterState>()(
               set({ currentCharacter: updatedCharacter });
             }
 
+            // Notify condition removed
+            get().addNotification(
+              "info",
+              `Condition ${condition} removed from ${updatedCharacter.name}`
+            );
+
             set({ isLoading: false });
             return true;
           } catch (error: any) {
@@ -337,6 +419,9 @@ export const useCharacterStore = create<CharacterState>()(
               error: error.message || "Failed to remove condition",
               isLoading: false,
             });
+
+            // Notify error
+            get().addNotification("error", "Failed to remove condition");
             return false;
           }
         },
@@ -459,6 +544,20 @@ export const useCharacterStore = create<CharacterState>()(
             error: null,
             lockedResources: {},
           });
+        },
+
+        // Notification system
+        addNotification: (
+          type: "info" | "success" | "warning" | "error",
+          message: string
+        ) => {
+          // Se há um callback configurado (do gameStore), usa ele
+          if (notificationCallback) {
+            notificationCallback(type, message);
+          } else {
+            // Fallback para console se não há callback
+            console.log(`[Character Store] ${type.toUpperCase()}: ${message}`);
+          }
         },
       }),
       {

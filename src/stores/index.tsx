@@ -1,4 +1,12 @@
-// store/index.ts
+// src/stores/index.ts
+import React, { createContext, useContext, ReactNode, useEffect } from "react";
+import { useCharacterStore } from "./characterStore";
+import { useCombatStore } from "./combatStore";
+import { useGameStore } from "./gameStore";
+import { useNPCStore } from "./npcStore";
+import { initializeStoreConnections } from "./storeConnections";
+
+// Re-export stores
 export { useCharacterStore } from "./characterStore";
 export { useCombatStore } from "./combatStore";
 export { useGameStore } from "./gameStore";
@@ -9,13 +17,7 @@ export {
   useStoreSync,
 } from "./storeConnections";
 
-import React, { createContext, useContext, ReactNode, useEffect } from "react";
-import { useCharacterStore } from "./characterStore";
-import { useCombatStore } from "./combatStore";
-import { useGameStore } from "./gameStore";
-import { useNPCStore } from "./npcStore";
-import { initializeStoreConnections } from "./storeConnections";
-
+// Store context interface
 interface StoreContextType {
   characterStore: ReturnType<typeof useCharacterStore>;
   combatStore: ReturnType<typeof useCombatStore>;
@@ -23,8 +25,10 @@ interface StoreContextType {
   npcStore: ReturnType<typeof useNPCStore>;
 }
 
+// Create context
 const StoreContext = createContext<StoreContextType | null>(null);
 
+// Store Provider component
 export const StoreProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
@@ -53,6 +57,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({
   );
 };
 
+// Hook to use stores
 export const useStores = () => {
   const context = useContext(StoreContext);
   if (!context) {
