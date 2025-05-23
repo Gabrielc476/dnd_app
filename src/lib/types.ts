@@ -345,7 +345,7 @@ export interface ImageEvent extends WSMessage {
 
 export interface SpellEvent extends WSMessage {
   type: "spell";
-  action: "prepare" | "cast" | "reset_slots";
+  action: "prepare" | "cast" | "reset_slots" | "unprepare";
   character_id: string;
   data: Record<string, any>;
 }
