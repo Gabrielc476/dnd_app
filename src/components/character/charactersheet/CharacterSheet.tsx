@@ -4,6 +4,7 @@
 import React, { useState, useEffect } from "react";
 import { Character } from "@/lib/types";
 import { useCharacter } from "@/hooks/useCharacter";
+import { useCharacterSocket } from "@/lib/socket";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -32,7 +33,6 @@ export function CharacterSheet({
 }: CharacterSheetProps) {
   const { toast } = useToast();
 
-  // Usando o hook useCharacter existente - não precisa do useCharacterSheet!
   const {
     character,
     isLoading,
@@ -52,8 +52,48 @@ export function CharacterSheet({
     characterId,
   });
 
+  // WebSocket for dice rolls
+  const {
+    socket,
+    connected,
+    rollAbilityCheck: rollAbilityCheckSocket,
+  } = useCharacterSocket(campaignId, userId, characterId);
+
   const [isEditing, setIsEditing] = useState(false);
-  const [editingField, setEditingField] = useState<string | null>(null);
+
+  // Listen for roll results
+  useEffect(() => {
+    if (!socket || !connected) return;
+
+    const handleRollResult = (data: any) => {
+      if (data.character_id === characterId) {
+        const resultText = data.advantage
+          ? `with advantage`
+          : data.disadvantage
+          ? `with disadvantage`
+          : ``;
+
+        toast({
+          title: "Roll Result",
+          description: `${character?.name} rolled ${
+            data.result
+          } ${resultText} (${data.formula}${
+            data.modifier
+              ? data.modifier >= 0
+                ? `+${data.modifier}`
+                : data.modifier
+              : ""
+          }) for ${data.roll_type}`,
+        });
+      }
+    };
+
+    socket.on("roll_result", handleRollResult);
+
+    return () => {
+      socket.off("roll_result", handleRollResult);
+    };
+  }, [socket, connected, characterId, character?.name, toast]);
 
   // Handle character update with lock management
   const handleUpdate = async (
@@ -176,15 +216,138 @@ export function CharacterSheet({
   };
 
   // Handle dice rolls
-  const handleRollDice = (type: string, formula: string) => {
+  const handleRollDice = (
+    type: string,
+    formula: string,
+    advantage: boolean = false,
+    disadvantage: boolean = false
+  ) => {
     if (!character) return;
 
-    const success = rollAbilityCheck(characterId, type);
-    if (success) {
+    // Check if we can use WebSocket
+    if (connected && socket) {
+      // Parse the formula to extract dice and modifier
+      const formulaMatch = formula.match(/^(\d+)d(\d+)([+-]\d+)?$/);
+      let diceCount = 1;
+      let diceSize = 20;
+      let modifier = 0;
+
+      if (formulaMatch) {
+        diceCount = parseInt(formulaMatch[1]);
+        diceSize = parseInt(formulaMatch[2]);
+        if (formulaMatch[3]) {
+          modifier = parseInt(formulaMatch[3]);
+        }
+      }
+
+      // Send roll event through WebSocket
+      const rollEvent = {
+        type: "roll",
+        action: "custom",
+        character_id: characterId,
+        formula: formula,
+        modifier: modifier,
+        advantage: advantage,
+        disadvantage: disadvantage,
+        roll_type: type,
+      };
+
+      socket.emit("roll", rollEvent);
+
+      toast({
+        title: "Dice Rolling...",
+        description: `${character.name} is rolling ${formula} for ${type}`,
+      });
+    } else {
+      // Fallback to local roll simulation
+      const formulaMatch = formula.match(/^(\d+)d(\d+)([+-]\d+)?$/);
+      let diceCount = 1;
+      let diceSize = 20;
+      let modifier = 0;
+
+      if (formulaMatch) {
+        diceCount = parseInt(formulaMatch[1]);
+        diceSize = parseInt(formulaMatch[2]);
+        if (formulaMatch[3]) {
+          modifier = parseInt(formulaMatch[3]);
+        }
+      }
+
+      // Simulate dice roll
+      let total = 0;
+      const rolls: number[] = [];
+
+      for (let i = 0; i < diceCount; i++) {
+        const roll = Math.floor(Math.random() * diceSize) + 1;
+        rolls.push(roll);
+      }
+
+      if (advantage && diceCount === 1 && diceSize === 20) {
+        // Roll twice and take the higher
+        const secondRoll = Math.floor(Math.random() * 20) + 1;
+        rolls.push(secondRoll);
+        total = Math.max(rolls[0], secondRoll) + modifier;
+      } else if (disadvantage && diceCount === 1 && diceSize === 20) {
+        // Roll twice and take the lower
+        const secondRoll = Math.floor(Math.random() * 20) + 1;
+        rolls.push(secondRoll);
+        total = Math.min(rolls[0], secondRoll) + modifier;
+      } else {
+        // Normal roll
+        total = rolls.reduce((sum, roll) => sum + roll, 0) + modifier;
+      }
+
+      // Get attribute modifier if it's an ability check
+      const abilityMap: Record<string, keyof Character["attributes"]> = {
+        STR: "strength",
+        DEX: "dexterity",
+        CON: "constitution",
+        INT: "intelligence",
+        WIS: "wisdom",
+        CHA: "charisma",
+      };
+
+      let abilityModifier = 0;
+      const abilityKey = Object.keys(abilityMap).find((key) =>
+        type.toUpperCase().includes(key)
+      );
+
+      if (abilityKey && character.attributes) {
+        const ability = abilityMap[abilityKey];
+        const score = character.attributes[ability];
+        abilityModifier = Math.floor((score - 10) / 2);
+        total += abilityModifier;
+      }
+
+      // Special case for initiative
+      if (type.toLowerCase().includes("initiative")) {
+        const dexModifier = Math.floor(
+          (character.attributes.dexterity - 10) / 2
+        );
+        total += dexModifier + (character.initiative_bonus || 0);
+      }
+
       toast({
         title: "Dice Rolled",
-        description: `${character.name} rolled for ${type}`,
+        description: `${
+          character.name
+        } rolled ${total} for ${type} (${rolls.join(", ")}${
+          modifier !== 0 ? ` ${modifier >= 0 ? "+" : ""}${modifier}` : ""
+        }${
+          abilityModifier !== 0
+            ? ` ${abilityModifier >= 0 ? "+" : ""}${abilityModifier}`
+            : ""
+        })`,
       });
+
+      // Still try to send through the character hook for logging
+      const isAbilityCheck = abilityKey !== undefined;
+      if (isAbilityCheck && abilityKey) {
+        const ability = abilityMap[abilityKey];
+        rollAbilityCheck(characterId, ability);
+      } else {
+        rollAbilityCheck(characterId, type.toLowerCase().replace(/\s+/g, "_"));
+      }
     }
   };
 
@@ -198,7 +361,7 @@ export function CharacterSheet({
   }, [isEditing, characterId, releaseLock]);
 
   // Handle editing state
-  const startEditing = async (field?: string) => {
+  const startEditing = async () => {
     if (isReadOnly) return;
 
     const lockAcquired = await acquireLock(characterId);
@@ -214,12 +377,10 @@ export function CharacterSheet({
     }
 
     setIsEditing(true);
-    setEditingField(field || null);
   };
 
   const stopEditing = () => {
     setIsEditing(false);
-    setEditingField(null);
     releaseLock(characterId);
   };
 
@@ -237,7 +398,7 @@ export function CharacterSheet({
   if (error) {
     return (
       <Alert variant="destructive">
-        <AlertDescription>{error}</AlertDescription>
+        <AlertDescription>Error: {error}</AlertDescription>
       </Alert>
     );
   }
@@ -273,7 +434,7 @@ export function CharacterSheet({
         isReadOnly={isReadOnly || isCharacterLocked}
         onUpdate={handleUpdate}
         isEditing={isEditing}
-        onStartEditing={() => startEditing("header")}
+        onStartEditing={startEditing}
         onStopEditing={stopEditing}
       />
 
@@ -288,7 +449,7 @@ export function CharacterSheet({
             onUpdate={handleUpdate}
             onRollDice={handleRollDice}
             isEditing={isEditing}
-            onStartEditing={() => startEditing("attributes")}
+            onStartEditing={startEditing}
           />
 
           <CharacterDefenses
@@ -299,7 +460,7 @@ export function CharacterSheet({
             onUpdate={handleUpdate}
             onUpdateHP={handleHPUpdate}
             isEditing={isEditing}
-            onStartEditing={() => startEditing("defenses")}
+            onStartEditing={startEditing}
           />
 
           <CharacterConditions
@@ -322,7 +483,7 @@ export function CharacterSheet({
             onUpdate={handleUpdate}
             onRollDice={handleRollDice}
             isEditing={isEditing}
-            onStartEditing={() => startEditing("skills")}
+            onStartEditing={startEditing}
           />
 
           <CharacterFeatures
@@ -332,7 +493,7 @@ export function CharacterSheet({
             isReadOnly={isReadOnly || isCharacterLocked}
             onUpdate={handleUpdate}
             isEditing={isEditing}
-            onStartEditing={() => startEditing("features")}
+            onStartEditing={startEditing}
           />
         </div>
 
@@ -345,7 +506,7 @@ export function CharacterSheet({
             isReadOnly={isReadOnly || isCharacterLocked}
             onUpdate={handleUpdate}
             isEditing={isEditing}
-            onStartEditing={() => startEditing("inventory")}
+            onStartEditing={startEditing}
           />
 
           <CharacterActions
