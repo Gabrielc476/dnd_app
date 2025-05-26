@@ -21,5 +21,13 @@ export { SpellSearchFilters } from "./SpellSearchFilters";
 // Dialog components
 export { CastSpellDialog } from "./CastSpellDialog";
 
-// Types and utilities
+// Types and utilities - export everything from types
 export * from "./types";
+
+// Additional type aliases for convenience
+export type {
+  SpellSlot,
+  SpellFilters,
+  SpellCardBaseProps,
+  SpellActionHandlers,
+} from "./types";

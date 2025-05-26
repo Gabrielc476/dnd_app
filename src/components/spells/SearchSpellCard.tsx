@@ -5,6 +5,11 @@
 import React from "react";
 import { Plus, X } from "lucide-react";
 import { Spell } from "@/lib/types";
+import {
+  getSpellLevelColor,
+  getSpellLevelLabel,
+  getSchoolAbbreviation,
+} from "./types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";

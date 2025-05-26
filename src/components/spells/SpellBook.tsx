@@ -7,6 +7,11 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { RotateCcw, BookOpen } from "lucide-react";
 import { Character, Spell } from "@/lib/types";
+import { SpellSlot, SpellFilters } from "./types";
+import { PreparedSpellsList } from "./PreparedSpellsList";
+import { SpellSlotsList } from "./SpellSlotsList";
+import { SpellSearchFilters } from "./SpellSearchFilters";
+import { SpellSearchResults } from "./SpellSearchResults";
 import { useCompendium } from "@/hooks/useCompendium";
 import { useSpellSocket } from "@/lib/socket";
 import { Button } from "@/components/ui/button";
@@ -36,7 +41,7 @@ export function SpellBook({
   isReadOnly = false,
 }: SpellBookProps) {
   const [activeTab, setActiveTab] = useState("prepared");
-  const [searchFilters, setSearchFilters] = useState<SpellSearchFilters>({});
+  const [searchFilters, setSearchFilters] = useState<SpellFilters>({});
   const [searchResults, setSearchResults] = useState<Spell[]>([]);
   const [preparedSpells, setPreparedSpells] = useState<Spell[]>([]);
   const [isSearching, setIsSearching] = useState(false);

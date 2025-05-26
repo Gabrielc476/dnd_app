@@ -3,6 +3,7 @@
 // ========================================
 
 import React from "react";
+import { SpellFilters, SPELL_LEVELS, SPELL_SCHOOLS } from "./types";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -13,15 +14,15 @@ import {
 } from "@/components/ui/select";
 
 interface SpellSearchFiltersProps {
-  filters: SpellSearchFilters;
-  onFiltersChange: (filters: SpellSearchFilters) => void;
+  filters: SpellFilters;
+  onFiltersChange: (filters: SpellFilters) => void;
 }
 
 export function SpellSearchFilters({
   filters,
   onFiltersChange,
 }: SpellSearchFiltersProps) {
-  const updateFilter = (key: keyof SpellSearchFilters, value: string) => {
+  const updateFilter = (key: keyof SpellFilters, value: string) => {
     onFiltersChange({
       ...filters,
       [key]: value,

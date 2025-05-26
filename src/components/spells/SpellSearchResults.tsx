@@ -5,6 +5,7 @@
 import React from "react";
 import { Search, BookOpen } from "lucide-react";
 import { Spell } from "@/lib/types";
+import { SearchSpellCard } from "./SearchSpellCard";
 
 interface SpellSearchResultsProps {
   searchResults: Spell[];

@@ -5,6 +5,8 @@
 import React from "react";
 import { Sparkles } from "lucide-react";
 import { Spell } from "@/lib/types";
+import { SpellSlot } from "./types";
+import { PreparedSpellCard } from "./PreparedSpellCard";
 
 interface PreparedSpellsListProps {
   spells: Spell[];

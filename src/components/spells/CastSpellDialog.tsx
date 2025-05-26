@@ -5,6 +5,7 @@
 import React from "react";
 import { Zap } from "lucide-react";
 import { Spell } from "@/lib/types";
+import { SpellSlot } from "./types";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,

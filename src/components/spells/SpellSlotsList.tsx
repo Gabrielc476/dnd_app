@@ -3,6 +3,8 @@
 // ========================================
 
 import React from "react";
+import { SpellSlot } from "./types";
+import { SpellSlotCard } from "./SpellSlotCard";
 
 interface SpellSlotsListProps {
   spellSlots: SpellSlot[];
