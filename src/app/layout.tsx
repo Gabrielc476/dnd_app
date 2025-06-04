@@ -28,7 +28,6 @@ import "./globals.css";
 import { useAuth } from "@/hooks/useAuth";
 import { useGameStore } from "@/stores/gameStore";
 import { StoreProvider, initializeStores } from "@/stores";
-import { useWebSocketEvents } from "@/hooks/useWebSocketEvents";
 
 // UI Components
 import { Button } from "@/components/ui/button";
@@ -53,9 +52,8 @@ import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
-// Sonner for notifications
-import { Toaster } from "sonner";
-import { toast } from "sonner";
+// Toast provider
+import { Toaster } from "@/components/ui/toaster";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -106,7 +104,12 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated && !pathname.startsWith("/auth")) {
+    if (
+      !isLoading &&
+      !isAuthenticated &&
+      !pathname.startsWith("/auth") &&
+      pathname !== "/"
+    ) {
       router.push("/auth/login");
     }
   }, [isLoading, isAuthenticated, pathname, router]);
@@ -120,7 +123,7 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!isAuthenticated && !pathname.startsWith("/auth")) {
+  if (!isAuthenticated && !pathname.startsWith("/auth") && pathname !== "/") {
     return null;
   }
 
@@ -316,49 +319,54 @@ function Header() {
           </DropdownMenu>
 
           {/* User Menu */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-                <Avatar className="h-8 w-8">
-                  <AvatarImage src="" alt={user?.username} />
-                  <AvatarFallback>
-                    {user?.username?.charAt(0).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-56" align="end" forceMount>
-              <div className="flex items-center justify-start gap-2 p-2">
-                <div className="flex flex-col space-y-1 leading-none">
-                  <p className="font-medium">{user?.username}</p>
-                  <p className="w-[200px] truncate text-sm text-muted-foreground">
-                    {user?.email}
-                  </p>
-                  <Badge variant="outline" className="w-fit text-xs">
-                    {user?.role === "dm" ? "Dungeon Master" : "Player"}
-                  </Badge>
+          {user && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  className="relative h-8 w-8 rounded-full"
+                >
+                  <Avatar className="h-8 w-8">
+                    <AvatarImage src="" alt={user?.username} />
+                    <AvatarFallback>
+                      {user?.username?.charAt(0).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-56" align="end" forceMount>
+                <div className="flex items-center justify-start gap-2 p-2">
+                  <div className="flex flex-col space-y-1 leading-none">
+                    <p className="font-medium">{user?.username}</p>
+                    <p className="w-[200px] truncate text-sm text-muted-foreground">
+                      {user?.email}
+                    </p>
+                    <Badge variant="outline" className="w-fit text-xs">
+                      {user?.role === "dm" ? "Dungeon Master" : "Player"}
+                    </Badge>
+                  </div>
                 </div>
-              </div>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem asChild>
-                <a href="/profile">
-                  <User className="mr-2 h-4 w-4" />
-                  Profile
-                </a>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <a href="/settings">
-                  <Settings className="mr-2 h-4 w-4" />
-                  Settings
-                </a>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => logout()}>
-                <LogOut className="mr-2 h-4 w-4" />
-                Log out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <a href="/profile">
+                    <User className="mr-2 h-4 w-4" />
+                    Profile
+                  </a>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <a href="/settings">
+                    <Settings className="mr-2 h-4 w-4" />
+                    Settings
+                  </a>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => logout()}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Log out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </div>
     </header>
@@ -367,89 +375,16 @@ function Header() {
 
 // Main Layout Component
 function MainLayout({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
+  const pathname = usePathname();
   const currentCampaign = useGameStore((state) => state.currentCampaign);
-  const updateWebSocketStatus = useGameStore(
-    (state) => state.updateWebSocketStatus
-  );
-  const addNotification = useGameStore((state) => state.addNotification);
-  const setResourceLock = useGameStore((state) => state.setResourceLock);
-  const removeResourceLock = useGameStore((state) => state.removeResourceLock);
 
-  // WebSocket connection for real-time updates
-  const {
-    connected,
-    error: wsError,
-    addSystemEventListener,
-    removeSystemEventListener,
-    addLockEventListener,
-    removeLockEventListener,
-  } = useWebSocketEvents({
-    campaignId: currentCampaign?._id || "",
-    userId: user?.id || "",
-  });
+  // Don't show sidebar and header for auth pages and landing page
+  const isAuthPage = pathname.startsWith("/auth") || pathname === "/";
 
-  // Handle WebSocket events
-  useEffect(() => {
-    const handleSystemEvent = (event: any) => {
-      if (event.action === "notification") {
-        addNotification(event.details?.type || "info", event.message);
-
-        // Also show toast notification
-        const toastType = event.details?.type || "info";
-        if (toastType === "error") {
-          toast.error(event.message);
-        } else if (toastType === "success") {
-          toast.success(event.message);
-        } else if (toastType === "warning") {
-          toast.warning(event.message);
-        } else {
-          toast(event.message);
-        }
-      }
-    };
-
-    const handleLockEvent = (event: any) => {
-      if (event.action === "acquired") {
-        setResourceLock({
-          resourceType: event.resource_type,
-          resourceId: event.resource_id,
-          lockedBy: event.locked_by || "",
-          timestamp: new Date().toISOString(),
-        });
-      } else if (event.action === "released") {
-        removeResourceLock(event.resource_type, event.resource_id);
-      }
-    };
-
-    if (currentCampaign?._id && user?.id) {
-      addSystemEventListener(handleSystemEvent);
-      addLockEventListener(handleLockEvent);
-    }
-
-    return () => {
-      removeSystemEventListener(handleSystemEvent);
-      removeLockEventListener(handleLockEvent);
-    };
-  }, [
-    currentCampaign?._id,
-    user?.id,
-    addSystemEventListener,
-    removeSystemEventListener,
-    addLockEventListener,
-    removeLockEventListener,
-    addNotification,
-    setResourceLock,
-    removeResourceLock,
-  ]);
-
-  // Update WebSocket status
-  useEffect(() => {
-    updateWebSocketStatus({
-      connected,
-      error: wsError,
-    });
-  }, [connected, wsError, updateWebSocketStatus]);
+  if (isAuthPage) {
+    return <>{children}</>;
+  }
 
   return (
     <div className="flex h-screen bg-background">
@@ -463,15 +398,6 @@ function MainLayout({ children }: { children: React.ReactNode }) {
       {/* Main Content */}
       <div className="flex flex-col flex-1 overflow-hidden">
         <Header />
-
-        {/* WebSocket Error Alert */}
-        {wsError && (
-          <Alert variant="destructive" className="m-4">
-            <AlertDescription>
-              Connection error: {wsError}. Some features may not work properly.
-            </AlertDescription>
-          </Alert>
-        )}
 
         {/* No Campaign Warning */}
         {!currentCampaign && user && (
@@ -488,15 +414,6 @@ function MainLayout({ children }: { children: React.ReactNode }) {
           <div className="container mx-auto px-6 py-8">{children}</div>
         </main>
       </div>
-
-      {/* Sonner Toast Notifications */}
-      <Toaster
-        position="bottom-right"
-        richColors
-        closeButton
-        expand={false}
-        duration={4000}
-      />
     </div>
   );
 }
@@ -536,6 +453,7 @@ export default function RootLayout({
           <AuthGuard>
             <MainLayout>{children}</MainLayout>
           </AuthGuard>
+          <Toaster />
         </StoreProvider>
       </body>
     </html>

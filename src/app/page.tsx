@@ -1,12 +1,12 @@
-'use client';
+"use client";
 
-import React from 'react';
-import { useRouter } from 'next/navigation';
-import { 
-  Sword, 
-  Shield, 
-  Users, 
-  Dices, 
+import React from "react";
+import { useRouter } from "next/navigation";
+import {
+  Sword,
+  Shield,
+  Users,
+  Dices,
   Scroll,
   Crown,
   MapPin,
@@ -15,13 +15,19 @@ import {
   Github,
   Mail,
   Menu,
-  X
-} from 'lucide-react';
+  X,
+} from "lucide-react";
 
 // shadcn/ui components
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 
 const LandingPage = () => {
   const router = useRouter();
@@ -32,36 +38,45 @@ const LandingPage = () => {
     router.push(path);
     setMobileMenuOpen(false);
   };
+
+  // Features array
+  const features = [
     {
       icon: <Users className="h-8 w-8" />,
       title: "Sessões Multiplayer",
-      description: "Conecte-se com amigos e jogue em tempo real usando tecnologia WebSocket"
+      description:
+        "Conecte-se com amigos e jogue em tempo real usando tecnologia WebSocket",
     },
     {
       icon: <Scroll className="h-8 w-8" />,
       title: "Gerenciamento de Personagens",
-      description: "Crie e edite fichas detalhadas com cálculos automáticos e sincronização em tempo real"
+      description:
+        "Crie e edite fichas detalhadas com cálculos automáticos e sincronização em tempo real",
     },
     {
       icon: <Sword className="h-8 w-8" />,
       title: "Rastreador de Combate",
-      description: "Gerencie iniciativa, HP, condições e ações em encontros organizados de combate"
+      description:
+        "Gerencie iniciativa, HP, condições e ações em encontros organizados de combate",
     },
     {
       icon: <Dices className="h-8 w-8" />,
       title: "Sistema de Dados",
-      description: "Role dados com vantagem/desvantagem, modificadores e cálculo automático de resultados"
+      description:
+        "Role dados com vantagem/desvantagem, modificadores e cálculo automático de resultados",
     },
     {
       icon: <MapPin className="h-8 w-8" />,
       title: "Construtor de Campanhas",
-      description: "Projete encontros, gerencie NPCs e compartilhe mapas e imagens com seus jogadores"
+      description:
+        "Projete encontros, gerencie NPCs e compartilhe mapas e imagens com seus jogadores",
     },
     {
       icon: <Crown className="h-8 w-8" />,
       title: "Ferramentas para Mestres",
-      description: "Ferramentas poderosas para Mestres incluindo gestão de NPCs e planejamento de encontros"
-    }
+      description:
+        "Ferramentas poderosas para Mestres incluindo gestão de NPCs e planejamento de encontros",
+    },
   ];
 
   return (
@@ -78,18 +93,22 @@ const LandingPage = () => {
 
             {/* Desktop Navigation */}
             <div className="hidden md:flex items-center space-x-8">
-              <a href="#features" className="text-muted-foreground hover:text-foreground transition-colors">
+              <a
+                href="#features"
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
                 Funcionalidades
               </a>
-              <a href="#about" className="text-muted-foreground hover:text-foreground transition-colors">
+              <a
+                href="#about"
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
                 Sobre
               </a>
-              <Button variant="outline" onClick={() => router.push('/login')}>
+              <Button variant="outline" onClick={() => router.push("/auth")}>
                 Entrar
               </Button>
-              <Button onClick={() => router.push('/register')}>
-                Começar
-              </Button>
+              <Button onClick={() => router.push("/auth")}>Começar</Button>
             </div>
 
             {/* Mobile menu button */}
@@ -100,7 +119,11 @@ const LandingPage = () => {
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                 aria-label="Toggle mobile menu"
               >
-                {mobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+                {mobileMenuOpen ? (
+                  <X className="h-6 w-6" />
+                ) : (
+                  <Menu className="h-6 w-6" />
+                )}
               </Button>
             </div>
           </div>
@@ -109,17 +132,26 @@ const LandingPage = () => {
           {mobileMenuOpen && (
             <div className="md:hidden pb-4">
               <div className="flex flex-col space-y-4">
-                <a href="#features" className="text-muted-foreground hover:text-foreground transition-colors">
+                <a
+                  href="#features"
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                >
                   Funcionalidades
                 </a>
-                <a href="#about" className="text-muted-foreground hover:text-foreground transition-colors">
+                <a
+                  href="#about"
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                >
                   Sobre
                 </a>
                 <div className="flex flex-col space-y-2 pt-4">
-                  <Button variant="outline" onClick={() => navigateAndCloseMenu('/login')}>
+                  <Button
+                    variant="outline"
+                    onClick={() => navigateAndCloseMenu("/auth")}
+                  >
                     Entrar
                   </Button>
-                  <Button onClick={() => navigateAndCloseMenu('/register')}>
+                  <Button onClick={() => navigateAndCloseMenu("/auth")}>
                     Começar
                   </Button>
                 </div>
@@ -137,29 +169,39 @@ const LandingPage = () => {
               <Zap className="h-4 w-4 mr-1" />
               Mesa Virtual em Tempo Real
             </Badge>
-            
+
             <h1 className="text-4xl sm:text-6xl lg:text-7xl font-bold tracking-tight">
               Aventuras Épicas
               <span className="block text-primary">Aguardam Online</span>
             </h1>
-            
+
             <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
-              Experimente D&D como nunca antes com nossa Mesa Virtual moderna. 
-              Crie personagens, gerencie campanhas e embarque em aventuras lendárias com amigos de qualquer lugar do mundo.
+              Experimente D&D como nunca antes com nossa Mesa Virtual moderna.
+              Crie personagens, gerencie campanhas e embarque em aventuras
+              lendárias com amigos de qualquer lugar do mundo.
             </p>
-            
+
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-              <Button size="lg" className="text-lg px-8" onClick={() => router.push('/dashboard')}>
+              <Button
+                size="lg"
+                className="text-lg px-8"
+                onClick={() => router.push("/dashboard")}
+              >
                 Acessar Dashboard
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
-              <Button variant="outline" size="lg" className="text-lg px-8" onClick={() => router.push('/register')}>
+              <Button
+                variant="outline"
+                size="lg"
+                className="text-lg px-8"
+                onClick={() => router.push("/auth")}
+              >
                 Criar Conta
               </Button>
             </div>
           </div>
         </div>
-        
+
         {/* Background decoration */}
         <div className="absolute inset-0 -z-10 overflow-hidden">
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
@@ -179,112 +221,32 @@ const LandingPage = () => {
               Tudo Que Você Precisa para Campanhas Épicas
             </h2>
             <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-              Nossa plataforma VTT abrangente fornece todas as ferramentas necessárias para criar experiências inesquecíveis de D&D.
+              Nossa plataforma VTT abrangente fornece todas as ferramentas
+              necessárias para criar experiências inesquecíveis de D&D.
             </p>
           </div>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {/* Feature 1 - Sessões Multiplayer */}
-            <Card className="hover:shadow-lg transition-shadow duration-300">
-              <CardHeader>
-                <div className="flex items-center space-x-4">
-                  <div className="p-2 bg-primary/10 rounded-lg text-primary">
-                    <Users className="h-8 w-8" />
+            {features.map((feature, index) => (
+              <Card
+                key={index}
+                className="hover:shadow-lg transition-shadow duration-300"
+              >
+                <CardHeader>
+                  <div className="flex items-center space-x-4">
+                    <div className="p-2 bg-primary/10 rounded-lg text-primary">
+                      {feature.icon}
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg">{feature.title}</CardTitle>
+                    </div>
                   </div>
-                  <div>
-                    <CardTitle className="text-lg">Sessões Multiplayer</CardTitle>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription>Conecte-se com amigos e jogue em tempo real usando tecnologia WebSocket</CardDescription>
-              </CardContent>
-            </Card>
-
-            {/* Feature 2 - Gerenciamento de Personagens */}
-            <Card className="hover:shadow-lg transition-shadow duration-300">
-              <CardHeader>
-                <div className="flex items-center space-x-4">
-                  <div className="p-2 bg-primary/10 rounded-lg text-primary">
-                    <Scroll className="h-8 w-8" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg">Gerenciamento de Personagens</CardTitle>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription>Crie e edite fichas detalhadas com cálculos automáticos e sincronização em tempo real</CardDescription>
-              </CardContent>
-            </Card>
-
-            {/* Feature 3 - Rastreador de Combate */}
-            <Card className="hover:shadow-lg transition-shadow duration-300">
-              <CardHeader>
-                <div className="flex items-center space-x-4">
-                  <div className="p-2 bg-primary/10 rounded-lg text-primary">
-                    <Sword className="h-8 w-8" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg">Rastreador de Combate</CardTitle>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription>Gerencie iniciativa, HP, condições e ações em encontros organizados de combate</CardDescription>
-              </CardContent>
-            </Card>
-
-            {/* Feature 4 - Sistema de Dados */}
-            <Card className="hover:shadow-lg transition-shadow duration-300">
-              <CardHeader>
-                <div className="flex items-center space-x-4">
-                  <div className="p-2 bg-primary/10 rounded-lg text-primary">
-                    <Dices className="h-8 w-8" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg">Sistema de Dados</CardTitle>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription>Role dados com vantagem/desvantagem, modificadores e cálculo automático de resultados</CardDescription>
-              </CardContent>
-            </Card>
-
-            {/* Feature 5 - Construtor de Campanhas */}
-            <Card className="hover:shadow-lg transition-shadow duration-300">
-              <CardHeader>
-                <div className="flex items-center space-x-4">
-                  <div className="p-2 bg-primary/10 rounded-lg text-primary">
-                    <MapPin className="h-8 w-8" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg">Construtor de Campanhas</CardTitle>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription>Projete encontros, gerencie NPCs e compartilhe mapas e imagens com seus jogadores</CardDescription>
-              </CardContent>
-            </Card>
-
-            {/* Feature 6 - Ferramentas para Mestres */}
-            <Card className="hover:shadow-lg transition-shadow duration-300">
-              <CardHeader>
-                <div className="flex items-center space-x-4">
-                  <div className="p-2 bg-primary/10 rounded-lg text-primary">
-                    <Crown className="h-8 w-8" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg">Ferramentas para Mestres</CardTitle>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription>Ferramentas poderosas para Mestres incluindo gestão de NPCs e planejamento de encontros</CardDescription>
-              </CardContent>
-            </Card>
+                </CardHeader>
+                <CardContent>
+                  <CardDescription>{feature.description}</CardDescription>
+                </CardContent>
+              </Card>
+            ))}
           </div>
         </div>
       </section>
@@ -300,32 +262,45 @@ const LandingPage = () => {
               Construído por Jogadores, para Jogadores
             </h2>
             <p className="text-lg text-muted-foreground">
-              Nossa Mesa Virtual foi criada a partir de uma paixão por D&D e do desejo de tornar o jogo online 
-              tão envolvente quanto sentar em volta de uma mesa física. Com sincronização em tempo real, 
-              gerenciamento abrangente de personagens e ferramentas intuitivas para mestres, construímos a plataforma 
-              que sempre quisemos usar.
+              Nossa Mesa Virtual foi criada a partir de uma paixão por D&D e do
+              desejo de tornar o jogo online tão envolvente quanto sentar em
+              volta de uma mesa física. Com sincronização em tempo real,
+              gerenciamento abrangente de personagens e ferramentas intuitivas
+              para mestres, construímos a plataforma que sempre quisemos usar.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-12">
               <div className="space-y-4">
                 <div className="mx-auto w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
                   <Zap className="h-6 w-6 text-primary" />
                 </div>
-                <CardTitle className="text-lg font-semibold text-center">Tempo Real</CardTitle>
-                <CardDescription className="text-center">Sincronização WebSocket em tempo real para experiência fluida</CardDescription>
+                <CardTitle className="text-lg font-semibold text-center">
+                  Tempo Real
+                </CardTitle>
+                <CardDescription className="text-center">
+                  Sincronização WebSocket em tempo real para experiência fluida
+                </CardDescription>
               </div>
               <div className="space-y-4">
                 <div className="mx-auto w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
                   <Shield className="h-6 w-6 text-primary" />
                 </div>
-                <CardTitle className="text-lg font-semibold text-center">Segurança</CardTitle>
-                <CardDescription className="text-center">Proteção de dados segura e privacidade garantida</CardDescription>
+                <CardTitle className="text-lg font-semibold text-center">
+                  Segurança
+                </CardTitle>
+                <CardDescription className="text-center">
+                  Proteção de dados segura e privacidade garantida
+                </CardDescription>
               </div>
               <div className="space-y-4">
                 <div className="mx-auto w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
                   <Users className="h-6 w-6 text-primary" />
                 </div>
-                <CardTitle className="text-lg font-semibold text-center">Para Grupos</CardTitle>
-                <CardDescription className="text-center">Construído para grupos de todos os tamanhos</CardDescription>
+                <CardTitle className="text-lg font-semibold text-center">
+                  Para Grupos
+                </CardTitle>
+                <CardDescription className="text-center">
+                  Construído para grupos de todos os tamanhos
+                </CardDescription>
               </div>
             </div>
           </div>
@@ -340,24 +315,25 @@ const LandingPage = () => {
               Pronto para Começar Sua Aventura?
             </h2>
             <p className="text-xl opacity-90 max-w-2xl mx-auto">
-              Descubra uma nova forma de jogar D&D online com ferramentas modernas e interface intuitiva. 
-              Crie sua conta hoje e comece sua jornada lendária.
+              Descubra uma nova forma de jogar D&D online com ferramentas
+              modernas e interface intuitiva. Crie sua conta hoje e comece sua
+              jornada lendária.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-              <Button 
-                size="lg" 
-                variant="secondary" 
+              <Button
+                size="lg"
+                variant="secondary"
                 className="text-lg px-8"
-                onClick={() => router.push('/register')}
+                onClick={() => router.push("/auth")}
               >
                 Criar Conta Gratuita
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
-              <Button 
-                size="lg" 
-                variant="outline" 
+              <Button
+                size="lg"
+                variant="outline"
                 className="text-lg px-8 border-primary-foreground text-primary-foreground hover:bg-primary-foreground hover:text-primary"
-                onClick={() => router.push('/dashboard')}
+                onClick={() => router.push("/dashboard")}
               >
                 Ver Dashboard
               </Button>
@@ -376,52 +352,101 @@ const LandingPage = () => {
                 <span className="text-lg font-bold">D&D VTT</span>
               </div>
               <p className="text-sm text-muted-foreground">
-                A Mesa Virtual definitiva para campanhas de D&D 5e. Construído com amor para a comunidade.
+                A Mesa Virtual definitiva para campanhas de D&D 5e. Construído
+                com amor para a comunidade.
               </p>
             </div>
-            
+
             <div>
               <h3 className="font-semibold mb-4">Plataforma</h3>
               <div className="space-y-2 text-sm text-muted-foreground">
-                <div><a href="#features" className="hover:text-foreground transition-colors">Funcionalidades</a></div>
                 <div>
-                  <Button 
+                  <a
+                    href="#features"
+                    className="hover:text-foreground transition-colors"
+                  >
+                    Funcionalidades
+                  </a>
+                </div>
+                <div>
+                  <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => router.push('/dashboard')} 
+                    onClick={() => router.push("/dashboard")}
                     className="h-auto p-0 text-sm text-muted-foreground hover:text-foreground transition-colors"
                   >
                     Dashboard
                   </Button>
                 </div>
-                <div><a href="#" className="hover:text-foreground transition-colors">Documentação</a></div>
+                <div>
+                  <a
+                    href="#"
+                    className="hover:text-foreground transition-colors"
+                  >
+                    Documentação
+                  </a>
+                </div>
               </div>
             </div>
-            
+
             <div>
               <h3 className="font-semibold mb-4">Suporte</h3>
               <div className="space-y-2 text-sm text-muted-foreground">
-                <div><a href="#" className="hover:text-foreground transition-colors">Central de Ajuda</a></div>
-                <div><a href="#" className="hover:text-foreground transition-colors">Comunidade</a></div>
-                <div><a href="#" className="hover:text-foreground transition-colors">Contato</a></div>
+                <div>
+                  <a
+                    href="#"
+                    className="hover:text-foreground transition-colors"
+                  >
+                    Central de Ajuda
+                  </a>
+                </div>
+                <div>
+                  <a
+                    href="#"
+                    className="hover:text-foreground transition-colors"
+                  >
+                    Comunidade
+                  </a>
+                </div>
+                <div>
+                  <a
+                    href="#"
+                    className="hover:text-foreground transition-colors"
+                  >
+                    Contato
+                  </a>
+                </div>
               </div>
             </div>
-            
+
             <div>
               <h3 className="font-semibold mb-4">Conecte-se</h3>
               <div className="flex space-x-4">
-                <Button variant="ghost" size="icon" className="h-10 w-10" aria-label="GitHub">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10"
+                  aria-label="GitHub"
+                >
                   <Github className="h-5 w-5" />
                 </Button>
-                <Button variant="ghost" size="icon" className="h-10 w-10" aria-label="Email">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10"
+                  aria-label="Email"
+                >
                   <Mail className="h-5 w-5" />
                 </Button>
               </div>
             </div>
           </div>
-          
+
           <div className="border-t mt-8 pt-8 text-center text-sm text-muted-foreground">
-            <p>&copy; 2024 D&D VTT. Todos os direitos reservados. Feito com ⚔️ para a comunidade D&D.</p>
+            <p>
+              &copy; 2024 D&D VTT. Todos os direitos reservados. Feito com ⚔️
+              para a comunidade D&D.
+            </p>
           </div>
         </div>
       </footer>

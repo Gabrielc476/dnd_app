@@ -7,7 +7,7 @@ export { useCompendium } from "./useCompendium";
 export { useNPC } from "./useNPC";
 export { useLocks } from "./useLocks";
 export { useImage } from "./useImage";
-export { useWebSocketEvents } from "./useWebsocketEvents";
+export { useWebSocketEvents } from "./useWebSocketEvents";
 
 // Re-export types
 export type { UseAuthReturn } from "./useAuth";
@@ -22,4 +22,4 @@ export type {
   UseWebSocketEventsProps,
   UseWebSocketEventsReturn,
   EventHandler,
-} from "./useWebsocketEvents";
+} from "./useWebSocketEvents";
