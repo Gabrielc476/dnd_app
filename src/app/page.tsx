@@ -1,103 +1,437 @@
-import Image from "next/image";
+import React from 'react';
+import { useRouter } from 'next/navigation';
+import { 
+  Sword, 
+  Shield, 
+  Users, 
+  Dices, 
+  Scroll,
+  Crown,
+  MapPin,
+  Zap,
+  ArrowRight,
+  Github,
+  Mail,
+  Menu,
+  X
+} from 'lucide-react';
 
-export default function Home() {
+const Button = ({ children, variant = "default", size = "default", className = "", ...props }) => {
+  const baseClasses = "inline-flex items-center justify-center rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50";
+  
+  const variants = {
+    default: "bg-primary text-primary-foreground hover:bg-primary/90",
+    destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+    outline: "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
+    secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+    ghost: "hover:bg-accent hover:text-accent-foreground",
+    link: "text-primary underline-offset-4 hover:underline"
+  };
+  
+  const sizes = {
+    default: "h-10 px-4 py-2",
+    sm: "h-9 rounded-md px-3",
+    lg: "h-11 rounded-md px-8",
+    icon: "h-10 w-10"
+  };
+  
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+    <button 
+      className={`${baseClasses} ${variants[variant]} ${sizes[size]} ${className}`}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+};
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+const Card = ({ children, className = "", ...props }) => (
+  <div className={`rounded-lg border bg-card text-card-foreground shadow-sm ${className}`} {...props}>
+    {children}
+  </div>
+);
+
+const CardHeader = ({ children, className = "", ...props }) => (
+  <div className={`flex flex-col space-y-1.5 p-6 ${className}`} {...props}>
+    {children}
+  </div>
+);
+
+const CardTitle = ({ children, className = "", ...props }) => (
+  <h3 className={`text-2xl font-semibold leading-none tracking-tight ${className}`} {...props}>
+    {children}
+  </h3>
+);
+
+const CardContent = ({ children, className = "", ...props }) => (
+  <div className={`p-6 pt-0 ${className}`} {...props}>
+    {children}
+  </div>
+);
+
+const Badge = ({ children, variant = "default", className = "", ...props }) => {
+  const variants = {
+    default: "bg-primary text-primary-foreground hover:bg-primary/80",
+    secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+    destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/80",
+    outline: "text-foreground border border-input bg-background hover:bg-accent hover:text-accent-foreground"
+  };
+  
+  return (
+    <div className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ${variants[variant]} ${className}`} {...props}>
+      {children}
+    </div>
+  );
+};
+
+const LandingPage = () => {
+  const router = useRouter();
+  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
+
+  // Função helper para navegação e fechamento do menu mobile
+  const navigateAndCloseMenu = (path) => {
+    router.push(path);
+    setMobileMenuOpen(false);
+  };
+
+  const features = [
+    {
+      icon: <Users className="h-8 w-8" />,
+      title: "Sessões Multiplayer",
+      description: "Conecte-se com amigos e jogue em tempo real usando tecnologia WebSocket"
+    },
+    {
+      icon: <Scroll className="h-8 w-8" />,
+      title: "Gerenciamento de Personagens",
+      description: "Crie e edite fichas detalhadas com cálculos automáticos e sincronização em tempo real"
+    },
+    {
+      icon: <Sword className="h-8 w-8" />,
+      title: "Rastreador de Combate",
+      description: "Gerencie iniciativa, HP, condições e ações em encontros organizados de combate"
+    },
+    {
+      icon: <Dices className="h-8 w-8" />,
+      title: "Sistema de Dados",
+      description: "Role dados com vantagem/desvantagem, modificadores e cálculo automático de resultados"
+    },
+    {
+      icon: <MapPin className="h-8 w-8" />,
+      title: "Construtor de Campanhas",
+      description: "Projete encontros, gerencie NPCs e compartilhe mapas e imagens com seus jogadores"
+    },
+    {
+      icon: <Crown className="h-8 w-8" />,
+      title: "Ferramentas para Mestres",
+      description: "Ferramentas poderosas para Mestres incluindo gestão de NPCs e planejamento de encontros"
+    }
+  ];
+    {
+      icon: <Users className="h-8 w-8" />,
+      title: "Sessões Multiplayer",
+      description: "Conecte-se com amigos e jogue em tempo real usando tecnologia WebSocket"
+    },
+    {
+      icon: <Scroll className="h-8 w-8" />,
+      title: "Gerenciamento de Personagens",
+      description: "Crie e edite fichas detalhadas com cálculos automáticos e sincronização em tempo real"
+    },
+    {
+      icon: <Sword className="h-8 w-8" />,
+      title: "Rastreador de Combate",
+      description: "Gerencie iniciativa, HP, condições e ações em encontros organizados de combate"
+    },
+    {
+      icon: <Dices className="h-8 w-8" />,
+      title: "Sistema de Dados",
+      description: "Role dados com vantagem/desvantagem, modificadores e cálculo automático de resultados"
+    },
+    {
+      icon: <MapPin className="h-8 w-8" />,
+      title: "Construtor de Campanhas",
+      description: "Projete encontros, gerencie NPCs e compartilhe mapas e imagens com seus jogadores"
+    },
+    {
+      icon: <Crown className="h-8 w-8" />,
+      title: "Ferramentas para Mestres",
+      description: "Ferramentas poderosas para Mestres incluindo gestão de NPCs e planejamento de encontros"
+    }
+  ];
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Navigation */}
+      <nav className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            {/* Logo */}
+            <div className="flex items-center space-x-2">
+              <Shield className="h-8 w-8 text-primary" />
+              <span className="text-xl font-bold">D&D VTT</span>
+            </div>
+
+            {/* Desktop Navigation */}
+            <div className="hidden md:flex items-center space-x-8">
+              <a href="#features" className="text-muted-foreground hover:text-foreground transition-colors">
+                Funcionalidades
+              </a>
+              <a href="#about" className="text-muted-foreground hover:text-foreground transition-colors">
+                Sobre
+              </a>
+              <Button variant="outline" onClick={() => router.push('/login')}>
+                Entrar
+              </Button>
+              <Button onClick={() => router.push('/register')}>
+                Começar
+              </Button>
+            </div>
+
+            {/* Mobile menu button */}
+            <div className="md:hidden">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              >
+                {mobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+              </Button>
+            </div>
+          </div>
+
+          {/* Mobile Navigation */}
+          {mobileMenuOpen && (
+            <div className="md:hidden pb-4">
+              <div className="flex flex-col space-y-4">
+                <a href="#features" className="text-muted-foreground hover:text-foreground transition-colors">
+                  Funcionalidades
+                </a>
+                <a href="#about" className="text-muted-foreground hover:text-foreground transition-colors">
+                  Sobre
+                </a>
+                <div className="flex flex-col space-y-2 pt-4">
+                  <Button variant="outline" onClick={() => navigateAndCloseMenu('/login')}>
+                    Entrar
+                  </Button>
+                  <Button onClick={() => navigateAndCloseMenu('/register')}>
+                    Começar
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
+      </nav>
+
+      {/* Hero Section */}
+      <section className="relative overflow-hidden">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-20 lg:py-32">
+          <div className="text-center space-y-8">
+            <Badge variant="secondary" className="text-sm">
+              <Zap className="h-4 w-4 mr-1" />
+              Mesa Virtual em Tempo Real
+            </Badge>
+            
+            <h1 className="text-4xl sm:text-6xl lg:text-7xl font-bold tracking-tight">
+              Aventuras Épicas
+              <span className="block text-primary">Aguardam Online</span>
+            </h1>
+            
+            <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
+              Experimente D&D como nunca antes com nossa Mesa Virtual moderna. 
+              Crie personagens, gerencie campanhas e embarque em aventuras lendárias com amigos de qualquer lugar do mundo.
+            </p>
+            
+            <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+              <Button size="lg" className="text-lg px-8" onClick={() => router.push('/dashboard')}>
+                Acessar Dashboard
+                <ArrowRight className="ml-2 h-5 w-5" />
+              </Button>
+              <Button variant="outline" size="lg" className="text-lg px-8" onClick={() => router.push('/register')}>
+                Criar Conta
+              </Button>
+            </div>
+          </div>
+        </div>
+        
+        {/* Background decoration */}
+        <div className="absolute inset-0 -z-10 overflow-hidden">
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+            <div className="h-96 w-96 rounded-full bg-primary/10 blur-3xl"></div>
+          </div>
+        </div>
+      </section>
+
+      {/* Features Section */}
+      <section id="features" className="py-20 bg-muted/30">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center space-y-4 mb-16">
+            <Badge variant="outline" className="text-sm">
+              Funcionalidades
+            </Badge>
+            <h2 className="text-3xl sm:text-4xl font-bold">
+              Tudo Que Você Precisa para Campanhas Épicas
+            </h2>
+            <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
+              Nossa plataforma VTT abrangente fornece todas as ferramentas necessárias para criar experiências inesquecíveis de D&D.
+            </p>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {features.map((feature, index) => (
+              <Card key={index} className="hover:shadow-lg transition-shadow duration-300">
+                <CardHeader>
+                  <div className="flex items-center space-x-4">
+                    <div className="p-2 bg-primary/10 rounded-lg text-primary">
+                      {feature.icon}
+                    </div>
+                    <CardTitle className="text-lg">{feature.title}</CardTitle>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-muted-foreground">{feature.description}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* About Section */}
+      <section id="about" className="py-20">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="max-w-4xl mx-auto text-center space-y-8">
+            <Badge variant="outline" className="text-sm">
+              Sobre o D&D VTT
+            </Badge>
+            <h2 className="text-3xl sm:text-4xl font-bold">
+              Construído por Jogadores, para Jogadores
+            </h2>
+            <p className="text-lg text-muted-foreground">
+              Nossa Mesa Virtual foi criada a partir de uma paixão por D&D e do desejo de tornar o jogo online 
+              tão envolvente quanto sentar em volta de uma mesa física. Com sincronização em tempo real, 
+              gerenciamento abrangente de personagens e ferramentas intuitivas para mestres, construímos a plataforma 
+              que sempre quisemos usar.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-12">
+              <div className="space-y-4">
+                <div className="mx-auto w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
+                  <Zap className="h-6 w-6 text-primary" />
+                </div>
+                <h3 className="font-semibold">Tempo Real</h3>
+                <p className="text-sm text-muted-foreground">Sincronização WebSocket em tempo real para experiência fluida</p>
+              </div>
+              <div className="space-y-4">
+                <div className="mx-auto w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
+                  <Shield className="h-6 w-6 text-primary" />
+                </div>
+                <h3 className="font-semibold">Segurança</h3>
+                <p className="text-sm text-muted-foreground">Proteção de dados segura e privacidade garantida</p>
+              </div>
+              <div className="space-y-4">
+                <div className="mx-auto w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
+                  <Users className="h-6 w-6 text-primary" />
+                </div>
+                <h3 className="font-semibold">Para Grupos</h3>
+                <p className="text-sm text-muted-foreground">Construído para grupos de todos os tamanhos</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* CTA Section */}
+      <section className="py-20 bg-primary text-primary-foreground">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8 text-center">
+          <div className="space-y-6">
+            <h2 className="text-3xl sm:text-4xl font-bold">
+              Pronto para Começar Sua Aventura?
+            </h2>
+            <p className="text-xl opacity-90 max-w-2xl mx-auto">
+              Descubra uma nova forma de jogar D&D online com ferramentas modernas e interface intuitiva. 
+              Crie sua conta hoje e comece sua jornada lendária.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+              <Button 
+                size="lg" 
+                variant="secondary" 
+                className="text-lg px-8"
+                onClick={() => router.push('/register')}
+              >
+                Criar Conta Gratuita
+                <ArrowRight className="ml-2 h-5 w-5" />
+              </Button>
+              <Button 
+                size="lg" 
+                variant="outline" 
+                className="text-lg px-8 border-primary-foreground text-primary-foreground hover:bg-primary-foreground hover:text-primary"
+                onClick={() => router.push('/dashboard')}
+              >
+                Ver Dashboard
+              </Button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="border-t bg-background py-12">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+            <div className="space-y-4">
+              <div className="flex items-center space-x-2">
+                <Shield className="h-6 w-6 text-primary" />
+                <span className="text-lg font-bold">D&D VTT</span>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                A Mesa Virtual definitiva para campanhas de D&D 5e. Construído com amor para a comunidade.
+              </p>
+            </div>
+            
+            <div>
+              <h3 className="font-semibold mb-4">Plataforma</h3>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <div><a href="#features" className="hover:text-foreground transition-colors">Funcionalidades</a></div>
+                <div>
+                  <button 
+                    onClick={() => router.push('/dashboard')} 
+                    className="hover:text-foreground transition-colors text-left bg-transparent border-none p-0 cursor-pointer"
+                  >
+                    Dashboard
+                  </button>
+                </div>
+                <div><a href="#" className="hover:text-foreground transition-colors">Documentação</a></div>
+              </div>
+            </div>
+            
+            <div>
+              <h3 className="font-semibold mb-4">Suporte</h3>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <div><a href="#" className="hover:text-foreground transition-colors">Central de Ajuda</a></div>
+                <div><a href="#" className="hover:text-foreground transition-colors">Comunidade</a></div>
+                <div><a href="#" className="hover:text-foreground transition-colors">Contato</a></div>
+              </div>
+            </div>
+            
+            <div>
+              <h3 className="font-semibold mb-4">Conecte-se</h3>
+              <div className="flex space-x-4">
+                <Button variant="ghost" size="icon">
+                  <Github className="h-5 w-5" />
+                </Button>
+                <Button variant="ghost" size="icon">
+                  <Mail className="h-5 w-5" />
+                </Button>
+              </div>
+            </div>
+          </div>
+          
+          <div className="border-t mt-8 pt-8 text-center text-sm text-muted-foreground">
+            <p>&copy; 2024 D&D VTT. Todos os direitos reservados. Feito com ⚔️ para a comunidade D&D.</p>
+          </div>
+        </div>
       </footer>
     </div>
   );
-}
+};
+
+export default LandingPage;
