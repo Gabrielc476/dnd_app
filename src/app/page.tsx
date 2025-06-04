@@ -1,3 +1,5 @@
+'use client';
+
 import React from 'react';
 import { useRouter } from 'next/navigation';
 import { 
@@ -16,116 +18,20 @@ import {
   X
 } from 'lucide-react';
 
-const Button = ({ children, variant = "default", size = "default", className = "", ...props }) => {
-  const baseClasses = "inline-flex items-center justify-center rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50";
-  
-  const variants = {
-    default: "bg-primary text-primary-foreground hover:bg-primary/90",
-    destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
-    outline: "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
-    secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-    ghost: "hover:bg-accent hover:text-accent-foreground",
-    link: "text-primary underline-offset-4 hover:underline"
-  };
-  
-  const sizes = {
-    default: "h-10 px-4 py-2",
-    sm: "h-9 rounded-md px-3",
-    lg: "h-11 rounded-md px-8",
-    icon: "h-10 w-10"
-  };
-  
-  return (
-    <button 
-      className={`${baseClasses} ${variants[variant]} ${sizes[size]} ${className}`}
-      {...props}
-    >
-      {children}
-    </button>
-  );
-};
-
-const Card = ({ children, className = "", ...props }) => (
-  <div className={`rounded-lg border bg-card text-card-foreground shadow-sm ${className}`} {...props}>
-    {children}
-  </div>
-);
-
-const CardHeader = ({ children, className = "", ...props }) => (
-  <div className={`flex flex-col space-y-1.5 p-6 ${className}`} {...props}>
-    {children}
-  </div>
-);
-
-const CardTitle = ({ children, className = "", ...props }) => (
-  <h3 className={`text-2xl font-semibold leading-none tracking-tight ${className}`} {...props}>
-    {children}
-  </h3>
-);
-
-const CardContent = ({ children, className = "", ...props }) => (
-  <div className={`p-6 pt-0 ${className}`} {...props}>
-    {children}
-  </div>
-);
-
-const Badge = ({ children, variant = "default", className = "", ...props }) => {
-  const variants = {
-    default: "bg-primary text-primary-foreground hover:bg-primary/80",
-    secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-    destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/80",
-    outline: "text-foreground border border-input bg-background hover:bg-accent hover:text-accent-foreground"
-  };
-  
-  return (
-    <div className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ${variants[variant]} ${className}`} {...props}>
-      {children}
-    </div>
-  );
-};
+// shadcn/ui components
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 
 const LandingPage = () => {
   const router = useRouter();
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
 
   // Função helper para navegação e fechamento do menu mobile
-  const navigateAndCloseMenu = (path) => {
+  const navigateAndCloseMenu = (path: string) => {
     router.push(path);
     setMobileMenuOpen(false);
   };
-
-  const features = [
-    {
-      icon: <Users className="h-8 w-8" />,
-      title: "Sessões Multiplayer",
-      description: "Conecte-se com amigos e jogue em tempo real usando tecnologia WebSocket"
-    },
-    {
-      icon: <Scroll className="h-8 w-8" />,
-      title: "Gerenciamento de Personagens",
-      description: "Crie e edite fichas detalhadas com cálculos automáticos e sincronização em tempo real"
-    },
-    {
-      icon: <Sword className="h-8 w-8" />,
-      title: "Rastreador de Combate",
-      description: "Gerencie iniciativa, HP, condições e ações em encontros organizados de combate"
-    },
-    {
-      icon: <Dices className="h-8 w-8" />,
-      title: "Sistema de Dados",
-      description: "Role dados com vantagem/desvantagem, modificadores e cálculo automático de resultados"
-    },
-    {
-      icon: <MapPin className="h-8 w-8" />,
-      title: "Construtor de Campanhas",
-      description: "Projete encontros, gerencie NPCs e compartilhe mapas e imagens com seus jogadores"
-    },
-    {
-      icon: <Crown className="h-8 w-8" />,
-      title: "Ferramentas para Mestres",
-      description: "Ferramentas poderosas para Mestres incluindo gestão de NPCs e planejamento de encontros"
-    }
-  ];
     {
       icon: <Users className="h-8 w-8" />,
       title: "Sessões Multiplayer",
@@ -192,6 +98,7 @@ const LandingPage = () => {
                 variant="ghost"
                 size="icon"
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                aria-label="Toggle mobile menu"
               >
                 {mobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
               </Button>
@@ -277,21 +184,107 @@ const LandingPage = () => {
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {features.map((feature, index) => (
-              <Card key={index} className="hover:shadow-lg transition-shadow duration-300">
-                <CardHeader>
-                  <div className="flex items-center space-x-4">
-                    <div className="p-2 bg-primary/10 rounded-lg text-primary">
-                      {feature.icon}
-                    </div>
-                    <CardTitle className="text-lg">{feature.title}</CardTitle>
+            {/* Feature 1 - Sessões Multiplayer */}
+            <Card className="hover:shadow-lg transition-shadow duration-300">
+              <CardHeader>
+                <div className="flex items-center space-x-4">
+                  <div className="p-2 bg-primary/10 rounded-lg text-primary">
+                    <Users className="h-8 w-8" />
                   </div>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-muted-foreground">{feature.description}</p>
-                </CardContent>
-              </Card>
-            ))}
+                  <div>
+                    <CardTitle className="text-lg">Sessões Multiplayer</CardTitle>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <CardDescription>Conecte-se com amigos e jogue em tempo real usando tecnologia WebSocket</CardDescription>
+              </CardContent>
+            </Card>
+
+            {/* Feature 2 - Gerenciamento de Personagens */}
+            <Card className="hover:shadow-lg transition-shadow duration-300">
+              <CardHeader>
+                <div className="flex items-center space-x-4">
+                  <div className="p-2 bg-primary/10 rounded-lg text-primary">
+                    <Scroll className="h-8 w-8" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">Gerenciamento de Personagens</CardTitle>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <CardDescription>Crie e edite fichas detalhadas com cálculos automáticos e sincronização em tempo real</CardDescription>
+              </CardContent>
+            </Card>
+
+            {/* Feature 3 - Rastreador de Combate */}
+            <Card className="hover:shadow-lg transition-shadow duration-300">
+              <CardHeader>
+                <div className="flex items-center space-x-4">
+                  <div className="p-2 bg-primary/10 rounded-lg text-primary">
+                    <Sword className="h-8 w-8" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">Rastreador de Combate</CardTitle>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <CardDescription>Gerencie iniciativa, HP, condições e ações em encontros organizados de combate</CardDescription>
+              </CardContent>
+            </Card>
+
+            {/* Feature 4 - Sistema de Dados */}
+            <Card className="hover:shadow-lg transition-shadow duration-300">
+              <CardHeader>
+                <div className="flex items-center space-x-4">
+                  <div className="p-2 bg-primary/10 rounded-lg text-primary">
+                    <Dices className="h-8 w-8" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">Sistema de Dados</CardTitle>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <CardDescription>Role dados com vantagem/desvantagem, modificadores e cálculo automático de resultados</CardDescription>
+              </CardContent>
+            </Card>
+
+            {/* Feature 5 - Construtor de Campanhas */}
+            <Card className="hover:shadow-lg transition-shadow duration-300">
+              <CardHeader>
+                <div className="flex items-center space-x-4">
+                  <div className="p-2 bg-primary/10 rounded-lg text-primary">
+                    <MapPin className="h-8 w-8" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">Construtor de Campanhas</CardTitle>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <CardDescription>Projete encontros, gerencie NPCs e compartilhe mapas e imagens com seus jogadores</CardDescription>
+              </CardContent>
+            </Card>
+
+            {/* Feature 6 - Ferramentas para Mestres */}
+            <Card className="hover:shadow-lg transition-shadow duration-300">
+              <CardHeader>
+                <div className="flex items-center space-x-4">
+                  <div className="p-2 bg-primary/10 rounded-lg text-primary">
+                    <Crown className="h-8 w-8" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">Ferramentas para Mestres</CardTitle>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <CardDescription>Ferramentas poderosas para Mestres incluindo gestão de NPCs e planejamento de encontros</CardDescription>
+              </CardContent>
+            </Card>
           </div>
         </div>
       </section>
@@ -317,22 +310,22 @@ const LandingPage = () => {
                 <div className="mx-auto w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
                   <Zap className="h-6 w-6 text-primary" />
                 </div>
-                <h3 className="font-semibold">Tempo Real</h3>
-                <p className="text-sm text-muted-foreground">Sincronização WebSocket em tempo real para experiência fluida</p>
+                <CardTitle className="text-lg font-semibold text-center">Tempo Real</CardTitle>
+                <CardDescription className="text-center">Sincronização WebSocket em tempo real para experiência fluida</CardDescription>
               </div>
               <div className="space-y-4">
                 <div className="mx-auto w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
                   <Shield className="h-6 w-6 text-primary" />
                 </div>
-                <h3 className="font-semibold">Segurança</h3>
-                <p className="text-sm text-muted-foreground">Proteção de dados segura e privacidade garantida</p>
+                <CardTitle className="text-lg font-semibold text-center">Segurança</CardTitle>
+                <CardDescription className="text-center">Proteção de dados segura e privacidade garantida</CardDescription>
               </div>
               <div className="space-y-4">
                 <div className="mx-auto w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
                   <Users className="h-6 w-6 text-primary" />
                 </div>
-                <h3 className="font-semibold">Para Grupos</h3>
-                <p className="text-sm text-muted-foreground">Construído para grupos de todos os tamanhos</p>
+                <CardTitle className="text-lg font-semibold text-center">Para Grupos</CardTitle>
+                <CardDescription className="text-center">Construído para grupos de todos os tamanhos</CardDescription>
               </div>
             </div>
           </div>
@@ -392,12 +385,14 @@ const LandingPage = () => {
               <div className="space-y-2 text-sm text-muted-foreground">
                 <div><a href="#features" className="hover:text-foreground transition-colors">Funcionalidades</a></div>
                 <div>
-                  <button 
+                  <Button 
+                    variant="ghost"
+                    size="sm"
                     onClick={() => router.push('/dashboard')} 
-                    className="hover:text-foreground transition-colors text-left bg-transparent border-none p-0 cursor-pointer"
+                    className="h-auto p-0 text-sm text-muted-foreground hover:text-foreground transition-colors"
                   >
                     Dashboard
-                  </button>
+                  </Button>
                 </div>
                 <div><a href="#" className="hover:text-foreground transition-colors">Documentação</a></div>
               </div>
@@ -415,10 +410,10 @@ const LandingPage = () => {
             <div>
               <h3 className="font-semibold mb-4">Conecte-se</h3>
               <div className="flex space-x-4">
-                <Button variant="ghost" size="icon">
+                <Button variant="ghost" size="icon" className="h-10 w-10" aria-label="GitHub">
                   <Github className="h-5 w-5" />
                 </Button>
-                <Button variant="ghost" size="icon">
+                <Button variant="ghost" size="icon" className="h-10 w-10" aria-label="Email">
                   <Mail className="h-5 w-5" />
                 </Button>
               </div>
