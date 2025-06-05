@@ -103,17 +103,35 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
+  console.log("🛡️ AuthGuard - Estado:", {
+    isLoading,
+    isAuthenticated,
+    hasUser: !!user,
+    pathname,
+  });
+
   useEffect(() => {
-    if (
-      !isLoading &&
-      !isAuthenticated &&
-      !pathname.startsWith("/auth") &&
-      pathname !== "/"
-    ) {
-      // Redireciona para /auth em vez de /auth/login
-      router.push("/auth");
+    // Só redirecionar após carregar e se não estiver autenticado
+    if (!isLoading && !isAuthenticated) {
+      const publicRoutes = ["/", "/auth"];
+      const isPublicRoute = publicRoutes.some(
+        (route) => pathname === route || pathname.startsWith("/auth")
+      );
+
+      if (!isPublicRoute) {
+        console.log("🚫 Não autenticado, redirecionando para /auth");
+        router.push("/auth");
+        return;
+      }
     }
-  }, [isLoading, isAuthenticated, pathname, router]);
+
+    // Se estiver autenticado e na página de auth, redirecionar para dashboard
+    if (!isLoading && isAuthenticated && pathname.startsWith("/auth")) {
+      console.log("✅ Já autenticado, redirecionando para /dashboard");
+      router.push("/dashboard");
+      return;
+    }
+  }, [isLoading, isAuthenticated, pathname, router, user]);
 
   if (isLoading) {
     return (
@@ -122,10 +140,6 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
         <span className="ml-2">Loading...</span>
       </div>
     );
-  }
-
-  if (!isAuthenticated && !pathname.startsWith("/auth") && pathname !== "/") {
-    return null;
   }
 
   return <>{children}</>;

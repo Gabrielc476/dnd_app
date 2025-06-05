@@ -55,8 +55,16 @@ interface DashboardStats {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, isAuthenticated, isLoading } = useAuth();
   const { toast } = useToast();
+
+  useEffect(() => {
+    console.log("📊 Dashboard carregado:");
+    console.log("- Usuário:", user?.username);
+    console.log("- Autenticado:", isAuthenticated);
+    console.log("- Carregando:", isLoading);
+    console.log("- Token presente:", !!localStorage.getItem("authToken"));
+  }, [user, isAuthenticated, isLoading]);
 
   const {
     campaigns,

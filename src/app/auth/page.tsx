@@ -42,6 +42,7 @@ export default function AuthPage() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log("🔐 Formulário de login submetido");
 
     if (!loginForm.username || !loginForm.password) {
       toast({
@@ -52,19 +53,33 @@ export default function AuthPage() {
       return;
     }
 
+    console.log("📝 Iniciando login para usuário:", loginForm.username);
+
     const success = await login(loginForm.username, loginForm.password);
+
+    console.log("🎯 Resultado do login:", success);
+
     if (success) {
       toast({
         title: "Bem-vindo!",
         description: "Login realizado com sucesso",
       });
-      router.push("/campaign");
+
+      console.log("🚀 Redirecionando para dashboard...");
+
+      // Aguardar um pequeno delay para garantir que o estado foi atualizado
+      setTimeout(() => {
+        router.push("/dashboard");
+      }, 500);
     } else {
       toast({
         title: "Erro no login",
         description: "Usuário ou senha incorretos",
         variant: "destructive",
       });
+
+      // Reset form only on error
+      setLoginForm({ username: "", password: "" });
     }
   };
 
