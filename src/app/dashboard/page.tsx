@@ -48,9 +48,7 @@ interface DashboardStats {
   totalCampaigns: number;
   activeCampaigns: number;
   totalCharacters: number;
-  totalSessions: number;
-  hoursPlayed: number;
-  favoriteClass: string;
+  favoriteClass?: string;
 }
 
 export default function DashboardPage() {
@@ -88,34 +86,7 @@ export default function DashboardPage() {
     totalCampaigns: 0,
     activeCampaigns: 0,
     totalCharacters: 0,
-    totalSessions: 0,
-    hoursPlayed: 0,
-    favoriteClass: "Fighter",
   });
-
-  const [recentActivity, setRecentActivity] = useState([
-    {
-      id: "1",
-      type: "session",
-      description: "Played session in 'Lost Mines of Phandelver'",
-      timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000),
-      icon: Dice6,
-    },
-    {
-      id: "2",
-      type: "character",
-      description: "Updated character 'Thorin Ironbeard'",
-      timestamp: new Date(Date.now() - 5 * 60 * 60 * 1000),
-      icon: User,
-    },
-    {
-      id: "3",
-      type: "campaign",
-      description: "Created new campaign 'Curse of Strahd'",
-      timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000),
-      icon: MapPin,
-    },
-  ]);
 
   // Load data on mount
   useEffect(() => {
@@ -135,26 +106,22 @@ export default function DashboardPage() {
         totalCampaigns: campaigns.length,
         activeCampaigns,
         totalCharacters: characters.length,
-        totalSessions: Math.floor(Math.random() * 50) + 10, // Mock data
-        hoursPlayed: Math.floor(Math.random() * 200) + 50, // Mock data
         favoriteClass: getMostPlayedClass(characters),
       });
     }
   }, [campaigns, characters]);
 
   const getMostPlayedClass = (chars: any[]) => {
-    if (!chars.length) return "Fighter";
+    if (!chars.length) return undefined;
 
     const classCounts = chars.reduce((acc, char) => {
       acc[char.class] = (acc[char.class] || 0) + 1;
       return acc;
     }, {});
 
-    return (
-      Object.entries(classCounts).sort(
-        ([, a], [, b]) => (b as number) - (a as number)
-      )[0]?.[0] || "Fighter"
-    );
+    return Object.entries(classCounts).sort(
+      ([, a], [, b]) => (b as number) - (a as number)
+    )[0]?.[0];
   };
 
   const handleCreateCampaign = async () => {
@@ -180,18 +147,6 @@ export default function DashboardPage() {
         variant: "destructive",
       });
     }
-  };
-
-  const formatTimeAgo = (date: Date) => {
-    const now = new Date();
-    const diffInHours = Math.floor(
-      (now.getTime() - date.getTime()) / (1000 * 60 * 60)
-    );
-
-    if (diffInHours < 1) return "Just now";
-    if (diffInHours < 24) return `${diffInHours}h ago`;
-    const diffInDays = Math.floor(diffInHours / 24);
-    return `${diffInDays}d ago`;
   };
 
   if (campaignsError || charactersError) {
@@ -257,37 +212,37 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{stats.totalCharacters}</div>
-            <p className="text-xs text-muted-foreground">
-              Favorite: {stats.favoriteClass}
-            </p>
+            {stats.favoriteClass ? (
+              <p className="text-xs text-muted-foreground">
+                Favorite: {stats.favoriteClass}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">No characters yet</p>
+            )}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
-              Sessions Played
+              Recent Activity
             </CardTitle>
             <Activity className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.totalSessions}</div>
-            <p className="text-xs text-muted-foreground">
-              {stats.hoursPlayed}h total
-            </p>
+            <div className="text-2xl font-bold">-</div>
+            <p className="text-xs text-muted-foreground">No recent activity</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">XP This Month</CardTitle>
+            <CardTitle className="text-sm font-medium">Progress</CardTitle>
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">2,350</div>
-            <p className="text-xs text-muted-foreground">
-              +12% from last month
-            </p>
+            <div className="text-2xl font-bold">-</div>
+            <p className="text-xs text-muted-foreground">Track your progress</p>
           </CardContent>
         </Card>
       </div>
@@ -298,7 +253,6 @@ export default function DashboardPage() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="campaigns">Campaigns</TabsTrigger>
           <TabsTrigger value="characters">Characters</TabsTrigger>
-          <TabsTrigger value="activity">Activity</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
@@ -544,41 +498,6 @@ export default function DashboardPage() {
               ))
             )}
           </div>
-        </TabsContent>
-
-        <TabsContent value="activity" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Recent Activity</CardTitle>
-              <CardDescription>
-                Your latest actions and game events
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ScrollArea className="h-[400px]">
-                <div className="space-y-4">
-                  {recentActivity.map((activity) => (
-                    <div
-                      key={activity.id}
-                      className="flex items-center space-x-4"
-                    >
-                      <div className="p-2 bg-muted rounded-full">
-                        <activity.icon className="h-4 w-4" />
-                      </div>
-                      <div className="flex-1 space-y-1">
-                        <p className="text-sm font-medium">
-                          {activity.description}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatTimeAgo(activity.timestamp)}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
         </TabsContent>
       </Tabs>
     </div>
