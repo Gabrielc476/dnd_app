@@ -1,4 +1,5 @@
-# app/db.py
+# app/db.py - Correção da classe SafeCollection
+
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase, AsyncIOMotorCollection
 from bson import ObjectId
 from bson.errors import InvalidId
@@ -138,13 +139,14 @@ class SafeCollection:
             # Se não encontrar e o ID foi alterado, tenta com o original
             if filter_copy["_id"] != original_id:
                 filter_copy["_id"] = original_id
-                return await self._collection.delete_one(filter_copy, update, *args, **kwargs)
+                return await self._collection.delete_one(filter_copy, *args, **kwargs)
             return result
 
         return await self._collection.delete_one(filter, *args, **kwargs)
 
-    async def find(self, *args, **kwargs):
-        """Mantem o método find original."""
+    # CORREÇÃO: Remover async do método find
+    def find(self, *args, **kwargs):
+        """Mantém o método find original - NÃO DEVE SER ASYNC."""
         return self._collection.find(*args, **kwargs)
 
     async def insert_one(self, document, *args, **kwargs):
@@ -177,6 +179,10 @@ class SafeCollection:
             documents_copy.append(doc_copy)
 
         return await self._collection.insert_many(documents_copy, *args, **kwargs)
+
+    async def delete_many(self, filter, *args, **kwargs):
+        """Wrapper para delete_many."""
+        return await self._collection.delete_many(filter, *args, **kwargs)
 
     # Delegar todas as outras operações à coleção original
     def __getattr__(self, name):

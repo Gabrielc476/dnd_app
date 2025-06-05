@@ -1,4 +1,5 @@
-# app/services/campaign_service.py
+# app/services/campaign_service.py - Versão corrigida
+
 from datetime import datetime
 from typing import List, Dict, Optional, Any, Union
 from bson import ObjectId
@@ -8,7 +9,8 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.schemas.campaign import (
     CampaignCreateSchema, CampaignUpdateSchema, EncounterCreateSchema,
-    EncounterUpdateSchema, TrapSchema, NPCReferenceSchema, ImageSchema
+    EncounterUpdateSchema, TrapSchema, NPCReferenceSchema, ImageSchema,
+    CampaignListSchema, CampaignSchema
 )
 
 
@@ -40,6 +42,31 @@ class CampaignService:
     def _format_id_list(self, items):
         """Formata os IDs de uma lista de itens para string."""
         return [self._format_id(item) for item in items] if items else []
+
+    def _campaign_to_list_item(self, campaign: Dict[str, Any]) -> Dict[str, Any]:
+        """Converte um documento de campanha do MongoDB para o formato da lista."""
+        # Calcular player_count
+        player_count = len(campaign.get("players", []))
+
+        # Calcular se está ativa (tem encounter ativo ou foi atualizada recentemente)
+        active = bool(campaign.get("active_encounter"))
+        if not active:
+            # Considera ativa se foi atualizada nos últimos 30 dias
+            updated_at = campaign.get("updated_at", campaign.get("created_at"))
+            if updated_at:
+                from datetime import timedelta
+                thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+                active = updated_at > thirty_days_ago
+
+        return {
+            "_id": str(campaign["_id"]),
+            "name": campaign["name"],
+            "description": campaign.get("description"),
+            "dm_id": campaign["dm_id"],
+            "player_count": player_count,
+            "active": active,
+            "created_at": campaign["created_at"]
+        }
 
     async def create_campaign(self, campaign_data: CampaignCreateSchema) -> Dict[str, Any]:
         """
@@ -229,7 +256,7 @@ class CampaignService:
             user_id: ID do usuário
 
         Returns:
-            Lista de campanhas
+            Lista de campanhas no formato CampaignListSchema
         """
         # Campanhas em que o usuário é DM
         dm_query = {"dm_id": user_id}
@@ -241,8 +268,13 @@ class CampaignService:
         cursor = self.db.campaigns.find(combined_query)
         campaigns = await cursor.to_list(length=100)
 
-        # Formatar IDs para string antes de retornar
-        return self._format_id_list(campaigns)
+        # Converter para o formato de lista
+        campaign_list = []
+        for campaign in campaigns:
+            list_item = self._campaign_to_list_item(campaign)
+            campaign_list.append(list_item)
+
+        return campaign_list
 
     async def add_player(self, campaign_id: str, user_id: str, player_id: str) -> Dict[str, Any]:
         """
@@ -378,186 +410,6 @@ class CampaignService:
 
         # Formatar ID para string antes de retornar
         return self._format_id(updated_campaign)
-
-    async def create_encounter(
-            self,
-            campaign_id: str,
-            user_id: str,
-            encounter_data: EncounterCreateSchema
-    ) -> Dict[str, Any]:
-        """
-        Cria um novo encontro em uma campanha.
-
-        Args:
-            campaign_id: ID da campanha
-            user_id: ID do usuário que está fazendo a solicitação (deve ser o DM)
-            encounter_data: Dados do encontro a ser criado
-
-        Returns:
-            Campanha atualizada com o novo encontro
-
-        Raises:
-            HTTPException: Se a campanha não for encontrada ou o usuário não for o DM
-        """
-        # Verificar se a campanha existe
-        campaign = await self.db.campaigns.find_one(campaign_id)
-
-        if not campaign:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Campanha com ID {campaign_id} não encontrada"
-            )
-
-        # Verificar se o usuário é o DM da campanha
-        if str(campaign.get("dm_id")) != str(user_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Apenas o DM pode criar encontros nesta campanha"
-            )
-
-        # Preparar dados do encontro
-        encounter_dict = encounter_data.dict()
-        campaign_id_str = str(campaign.get("_id"))
-
-        # Gerar ID único para o encontro
-        encounter_id = str(ObjectId())
-        encounter_dict["id"] = encounter_id
-
-        # Verificar referências a NPCs
-        for npc_ref in encounter_dict.get("npcs", []):
-            npc_id = npc_ref.get("npc_id")
-            npc = await self.db.npcs.find_one(npc_id)
-
-            if not npc:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"NPC com ID {npc_id} não encontrado"
-                )
-
-            # Verificar se o NPC pertence a esta campanha
-            if str(npc.get("campaign_id")) != campaign_id_str:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"NPC com ID {npc_id} não pertence a esta campanha"
-                )
-
-        # Verificar referência a imagem de mapa
-        map_image_id = encounter_dict.get("map_image_id")
-        if map_image_id:
-            # Verificar se a imagem existe na campanha
-            image_exists = False
-            for image in campaign.get("images", []):
-                if str(image.get("id")) == str(map_image_id):
-                    image_exists = True
-                    break
-
-            if not image_exists:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Imagem com ID {map_image_id} não encontrada nesta campanha"
-                )
-
-        # Adicionar o encontro à lista de encontros da campanha
-        encounters = campaign.get("encounters", [])
-        encounters.append(encounter_dict)
-
-        # Atualizar a campanha
-        await self.db.campaigns.update_one(
-            campaign_id,
-            {
-                "$set": {
-                    "encounters": encounters,
-                    "updated_at": datetime.utcnow()
-                }
-            }
-        )
-
-        # Recuperar a campanha atualizada
-        updated_campaign = await self.db.campaigns.find_one(campaign_id)
-
-        # Formatar ID para string antes de retornar
-        return self._format_id(updated_campaign)
-
-    async def update_encounter(
-            self,
-            campaign_id: str,
-            encounter_id: str,
-            user_id: str,
-            updates: EncounterUpdateSchema
-    ) -> Dict[str, Any]:
-        """
-        Atualiza um encontro em uma campanha.
-
-        Args:
-            campaign_id: ID da campanha
-            encounter_id: ID do encontro
-            user_id: ID do usuário que está fazendo a solicitação (deve ser o DM)
-            updates: Dados a serem atualizados
-
-        Returns:
-            Campanha atualizada
-
-        Raises:
-            HTTPException: Se a campanha ou encontro não forem encontrados ou o usuário não for o DM
-        """
-        # Verificar se a campanha existe
-        campaign = await self.db.campaigns.find_one(campaign_id)
-
-        if not campaign:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Campanha com ID {campaign_id} não encontrada"
-            )
-
-        # Verificar se o usuário é o DM da campanha
-        if str(campaign.get("dm_id")) != str(user_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Apenas o DM pode atualizar encontros nesta campanha"
-            )
-
-        # Encontrar o encontro
-        encounters = campaign.get("encounters", [])
-        encounter_index = None
-
-        for i, encounter in enumerate(encounters):
-            if str(encounter.get("id")) == str(encounter_id):
-                encounter_index = i
-                break
-
-        if encounter_index is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Encontro com ID {encounter_id} não encontrado nesta campanha"
-            )
-
-        # Preparar os dados de atualização
-        update_data = updates.dict(exclude_unset=True)
-
-        # Atualizar o encontro
-        encounter = encounters[encounter_index]
-        for key, value in update_data.items():
-            if value is not None:
-                encounter[key] = value
-
-        # Atualizar a campanha
-        await self.db.campaigns.update_one(
-            campaign_id,
-            {
-                "$set": {
-                    "encounters": encounters,
-                    "updated_at": datetime.utcnow()
-                }
-            }
-        )
-
-        # Recuperar a campanha atualizada
-        updated_campaign = await self.db.campaigns.find_one(campaign_id)
-
-        # Formatar ID para string antes de retornar
-        return self._format_id(updated_campaign)
-
-    # Adicione outros métodos da classe aqui com o mesmo tratamento de IDs...
 
     async def _check_campaign_access(self, campaign: Dict[str, Any], user_id: str) -> None:
         """
