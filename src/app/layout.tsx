@@ -110,7 +110,8 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
       !pathname.startsWith("/auth") &&
       pathname !== "/"
     ) {
-      router.push("/auth/login");
+      // Redireciona para /auth em vez de /auth/login
+      router.push("/auth");
     }
   }, [isLoading, isAuthenticated, pathname, router]);
 
