@@ -29,6 +29,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { useGameStore } from "@/stores/gameStore";
 import { StoreProvider, initializeStores } from "@/stores";
 
+// Sonner (toast) instead of Toaster
+import { Toaster } from "sonner";
+
 // UI Components
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -51,9 +54,6 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-
-// Toast provider
-import { Toaster } from "@/components/ui/toaster";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -453,7 +453,8 @@ export default function RootLayout({
           <AuthGuard>
             <MainLayout>{children}</MainLayout>
           </AuthGuard>
-          <Toaster />
+          {/* Sonner Toaster */}
+          <Toaster position="top-right" />
         </StoreProvider>
       </body>
     </html>
