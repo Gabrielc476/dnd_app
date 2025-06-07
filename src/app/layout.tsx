@@ -1,4 +1,4 @@
-// src/app/layout.tsx - VERSÃO CORRIGIDA
+// src/app/layout.tsx - VERSÃO CORRIGIDA - ROTEAMENTO FIXADO
 "use client";
 
 import React, { useEffect, useState, useRef } from "react";
@@ -97,7 +97,7 @@ const navigationItems = [
   },
 ];
 
-// ✅ NOVA VERSÃO DO AUTH GUARD - SEM LOOPS INFINITOS
+// ✅ AUTHGUARD CORRIGIDO - SEM REDIRECIONAMENTO AUTOMÁTICO DA HOME
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { user, isLoading, isAuthenticated } = useAuth();
   const router = useRouter();
@@ -115,7 +115,7 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
     }
   }, [pathname]);
 
-  // ✅ Lógica de redirecionamento simplificada e com proteção
+  // ✅ Lógica de redirecionamento corrigida
   useEffect(() => {
     // ✅ Não fazer nada enquanto ainda está carregando
     if (isLoading) {
@@ -129,21 +129,37 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // ✅ Rotas públicas (não precisam autenticação)
+    // ✅ Rotas públicas (acessíveis por todos)
     const publicRoutes = ["/", "/auth"];
     const isPublicRoute = publicRoutes.some(
       (route) => pathname === route || pathname.startsWith("/auth")
     );
 
+    // ✅ Rotas que requerem autenticação
+    const protectedRoutes = [
+      "/dashboard",
+      "/characters",
+      "/campaign",
+      "/npcs",
+      "/combat",
+      "/compendium",
+      "/settings",
+      "/profile",
+    ];
+    const isProtectedRoute = protectedRoutes.some((route) =>
+      pathname.startsWith(route)
+    );
+
     console.log("🛡️ AuthGuard - Verificação:", {
       isAuthenticated,
       isPublicRoute,
+      isProtectedRoute,
       pathname,
       hasUser: !!user,
     });
 
     // ✅ CASO 1: Não autenticado tentando acessar rota protegida
-    if (!isAuthenticated && !isPublicRoute) {
+    if (!isAuthenticated && isProtectedRoute) {
       console.log(
         "🚫 Não autenticado em rota protegida, redirecionando para /auth"
       );
@@ -152,7 +168,7 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // ✅ CASO 2: Autenticado tentando acessar página de auth
+    // ✅ CASO 2: Autenticado tentando acessar página de auth (apenas /auth, não home)
     if (isAuthenticated && pathname.startsWith("/auth")) {
       console.log(
         "✅ Já autenticado na página de auth, redirecionando para /dashboard"
@@ -162,13 +178,8 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // ✅ CASO 3: Autenticado na home, redirecionar para dashboard
-    if (isAuthenticated && pathname === "/") {
-      console.log("✅ Autenticado na home, redirecionando para /dashboard");
-      hasRedirectedRef.current = true;
-      router.replace("/dashboard");
-      return;
-    }
+    // ✅ CASO 3: REMOVIDO - Não redirecionar mais da home automaticamente
+    // Usuários autenticados PODEM ver a landing page se quiserem
   }, [isLoading, isAuthenticated, pathname, router, user]);
 
   // ✅ Mostrar loading enquanto carrega OU se está redirecionando
@@ -186,12 +197,21 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   }
 
   // ✅ Verificação final: se não autenticado em rota protegida, não renderizar
-  const publicRoutes = ["/", "/auth"];
-  const isPublicRoute = publicRoutes.some(
-    (route) => pathname === route || pathname.startsWith("/auth")
+  const protectedRoutes = [
+    "/dashboard",
+    "/characters",
+    "/campaign",
+    "/npcs",
+    "/combat",
+    "/compendium",
+    "/settings",
+    "/profile",
+  ];
+  const isProtectedRoute = protectedRoutes.some((route) =>
+    pathname.startsWith(route)
   );
 
-  if (!isAuthenticated && !isPublicRoute) {
+  if (!isAuthenticated && isProtectedRoute) {
     return null; // Não renderizar nada, redirecionamento será feito
   }
 
@@ -447,29 +467,43 @@ function Header() {
   );
 }
 
-// ✅ MAIN LAYOUT SIMPLIFICADO
+// ✅ MAIN LAYOUT CORRIGIDO
 function MainLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
   const pathname = usePathname();
   const currentCampaign = useGameStore((state) => state.currentCampaign);
 
-  // ✅ Verificação simples para páginas públicas
-  const publicRoutes = ["/", "/auth"];
-  const isPublicRoute = publicRoutes.some(
+  // ✅ Páginas que devem usar layout mínimo (sem sidebar/header)
+  const minimalLayoutRoutes = ["/", "/auth"];
+  const useMinimalLayout = minimalLayoutRoutes.some(
     (route) => pathname === route || pathname.startsWith("/auth")
   );
 
-  // ✅ Se for página pública, renderizar sem layout
-  if (isPublicRoute) {
+  // ✅ Se for página pública/auth, usar layout mínimo
+  if (useMinimalLayout) {
     return <>{children}</>;
   }
 
-  // ✅ Se não for autenticado em página privada, não renderizar layout
-  if (!isAuthenticated) {
+  // ✅ Se não for autenticado em página privada, não renderizar layout completo
+  const protectedRoutes = [
+    "/dashboard",
+    "/characters",
+    "/campaign",
+    "/npcs",
+    "/combat",
+    "/compendium",
+    "/settings",
+    "/profile",
+  ];
+  const isProtectedRoute = protectedRoutes.some((route) =>
+    pathname.startsWith(route)
+  );
+
+  if (!isAuthenticated && isProtectedRoute) {
     return <>{children}</>;
   }
 
-  // ✅ Renderizar layout completo para usuários autenticados
+  // ✅ Renderizar layout completo para usuários autenticados em páginas protegidas
   return (
     <div className="flex h-screen bg-background">
       {/* Desktop Sidebar */}
@@ -483,8 +517,8 @@ function MainLayout({ children }: { children: React.ReactNode }) {
       <div className="flex flex-col flex-1 overflow-hidden">
         <Header />
 
-        {/* No Campaign Warning */}
-        {!currentCampaign && (
+        {/* No Campaign Warning - apenas para páginas que precisam de campanha */}
+        {!currentCampaign && pathname !== "/campaign" && (
           <Alert className="m-4">
             <AlertDescription>
               No active campaign selected. Please select or create a campaign to
