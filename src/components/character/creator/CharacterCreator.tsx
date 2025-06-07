@@ -2,7 +2,7 @@
 
 "use client";
 
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useMemo } from "react";
 import { UserPlus, ArrowLeft, ArrowRight, Check, X } from "lucide-react";
 import { Character } from "@/lib/types";
 import { useCharacter } from "@/hooks/useCharacter";
@@ -104,7 +104,6 @@ export function CharacterCreator({
   });
 
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  const [steps, setSteps] = useState<CreationStep[]>(CREATION_STEPS);
   const [characterData, setCharacterData] = useState<CharacterCreationData>({
     name: "",
     race: null,
@@ -126,59 +125,98 @@ export function CharacterCreator({
     validationErrors: [],
   });
 
-  // Validate character data and update step completion
-  useEffect(() => {
+  // ✅ Memoize validation to prevent recalculating on every render
+  const validationResult = useMemo(() => {
     const errors = validateCharacterData(characterData);
-
-    setCharacterData((prev) => ({
-      ...prev,
+    return {
       isValid: errors.length === 0,
       validationErrors: errors,
-    }));
+    };
+  }, [
+    // Only depend on the fields that affect validation
+    characterData.name,
+    characterData.race,
+    characterData.characterClass,
+    characterData.background,
+    characterData.alignment,
+    characterData.attributes,
+    characterData.attributeMethod,
+    characterData.pointBuyRemaining,
+    characterData.startingEquipment.length,
+    characterData.spellcasting,
+  ]);
 
-    // Update step completion status
-    setSteps((prevSteps) =>
-      prevSteps.map((step) => {
-        let isComplete = false;
+  // ✅ Memoize step completion calculation
+  const stepCompletion = useMemo(() => {
+    return CREATION_STEPS.map((step) => {
+      let isComplete = false;
 
-        switch (step.id) {
-          case "basic":
-            isComplete =
-              !!characterData.name.trim() && !!characterData.alignment;
-            break;
-          case "race":
-            isComplete = !!characterData.race;
-            break;
-          case "class":
-            isComplete = !!characterData.characterClass;
-            break;
-          case "attributes":
-            isComplete = Object.values(characterData.attributes).every(
-              (score) => score >= 8 && score <= 20
-            );
-            break;
-          case "background":
-            isComplete = !!characterData.background;
-            break;
-          case "equipment":
-            isComplete = characterData.startingEquipment.length > 0;
-            break;
-          case "spells":
-            // Optional step - complete if not needed or if spells are selected
-            isComplete =
-              !characterData.characterClass?.spellcasting ||
-              (characterData.spellcasting?.cantrips?.length || 0) > 0;
-            break;
-          case "review":
-            isComplete = characterData.isValid;
-            break;
-        }
+      switch (step.id) {
+        case "basic":
+          isComplete = !!characterData.name.trim() && !!characterData.alignment;
+          break;
+        case "race":
+          isComplete = !!characterData.race;
+          break;
+        case "class":
+          isComplete = !!characterData.characterClass;
+          break;
+        case "attributes":
+          isComplete = Object.values(characterData.attributes).every(
+            (score) => score >= 8 && score <= 20
+          );
+          break;
+        case "background":
+          isComplete = !!characterData.background;
+          break;
+        case "equipment":
+          isComplete = characterData.startingEquipment.length > 0;
+          break;
+        case "spells":
+          // Optional step - complete if not needed or if spells are selected
+          isComplete =
+            !characterData.characterClass?.spellcasting ||
+            (characterData.spellcasting?.cantrips?.length || 0) > 0;
+          break;
+        case "review":
+          isComplete = validationResult.isValid;
+          break;
+      }
 
-        return { ...step, isComplete };
-      })
-    );
-  }, [characterData]);
+      return { ...step, isComplete };
+    });
+  }, [
+    characterData.name,
+    characterData.alignment,
+    characterData.race,
+    characterData.characterClass,
+    characterData.attributes,
+    characterData.background,
+    characterData.startingEquipment.length,
+    characterData.spellcasting?.cantrips?.length,
+    validationResult.isValid,
+  ]);
 
+  // ✅ Update character data with validation results (no infinite loop)
+  useEffect(() => {
+    setCharacterData((prev) => {
+      // Only update if validation actually changed
+      if (
+        prev.isValid !== validationResult.isValid ||
+        JSON.stringify(prev.validationErrors) !==
+          JSON.stringify(validationResult.validationErrors)
+      ) {
+        return {
+          ...prev,
+          isValid: validationResult.isValid,
+          validationErrors: validationResult.validationErrors,
+        };
+      }
+      return prev; // Return same reference if no change
+    });
+  }, [validationResult.isValid, validationResult.validationErrors]);
+
+  // ✅ Stable callback for data updates
   const handleDataUpdate = useCallback(
     (updates: Partial<CharacterCreationData>) => {
       setCharacterData((prev) => ({
@@ -190,20 +228,20 @@ export function CharacterCreator({
   );
 
   const handleNext = useCallback(() => {
-    const nextIndex = Math.min(currentStepIndex + 1, steps.length - 1);
+    const nextIndex = Math.min(currentStepIndex + 1, stepCompletion.length - 1);
 
     // Skip spell selection if character doesn't have spellcasting
     if (
-      steps[nextIndex].id === "spells" &&
+      stepCompletion[nextIndex].id === "spells" &&
       !characterData.characterClass?.spellcasting
     ) {
-      setCurrentStepIndex(Math.min(nextIndex + 1, steps.length - 1));
+      setCurrentStepIndex(Math.min(nextIndex + 1, stepCompletion.length - 1));
     } else {
       setCurrentStepIndex(nextIndex);
     }
   }, [
     currentStepIndex,
-    steps.length,
+    stepCompletion.length,
     characterData.characterClass?.spellcasting,
   ]);
 
@@ -212,20 +250,24 @@ export function CharacterCreator({
 
     // Skip spell selection if character doesn't have spellcasting
     if (
-      steps[prevIndex].id === "spells" &&
+      stepCompletion[prevIndex].id === "spells" &&
       !characterData.characterClass?.spellcasting
     ) {
       setCurrentStepIndex(Math.max(prevIndex - 1, 0));
     } else {
       setCurrentStepIndex(prevIndex);
     }
-  }, [currentStepIndex, characterData.characterClass?.spellcasting]);
+  }, [
+    currentStepIndex,
+    characterData.characterClass?.spellcasting,
+    stepCompletion,
+  ]);
 
   const handleStepClick = useCallback(
     (stepIndex: number) => {
       // Skip spell selection if character doesn't have spellcasting
       if (
-        steps[stepIndex].id === "spells" &&
+        stepCompletion[stepIndex].id === "spells" &&
         !characterData.characterClass?.spellcasting
       ) {
         return;
@@ -233,7 +275,7 @@ export function CharacterCreator({
 
       setCurrentStepIndex(stepIndex);
     },
-    [steps, characterData.characterClass?.spellcasting]
+    [stepCompletion, characterData.characterClass?.spellcasting]
   );
 
   const handleCreateCharacter = async () => {
@@ -306,8 +348,8 @@ export function CharacterCreator({
     }
   };
 
-  const currentStep = steps[currentStepIndex];
-  const progress = ((currentStepIndex + 1) / steps.length) * 100;
+  const currentStep = stepCompletion[currentStepIndex];
+  const progress = ((currentStepIndex + 1) / stepCompletion.length) * 100;
 
   const renderStepContent = () => {
     const stepProps = {
@@ -316,7 +358,7 @@ export function CharacterCreator({
       onNext: handleNext,
       onPrevious: handlePrevious,
       isFirstStep: currentStepIndex === 0,
-      isLastStep: currentStepIndex === steps.length - 1,
+      isLastStep: currentStepIndex === stepCompletion.length - 1,
     };
 
     switch (currentStep.id) {
@@ -372,7 +414,7 @@ export function CharacterCreator({
 
           {/* Step Navigation */}
           <div className="flex flex-wrap gap-2">
-            {steps.map((step, index) => {
+            {stepCompletion.map((step, index) => {
               // Hide spell step if not applicable
               if (step.id === "spells" && !showSpellStep) {
                 return null;
@@ -471,7 +513,7 @@ export function CharacterCreator({
                 Previous
               </Button>
 
-              {currentStepIndex === steps.length - 1 ? (
+              {currentStepIndex === stepCompletion.length - 1 ? (
                 <Button
                   onClick={handleCreateCharacter}
                   disabled={!characterData.isValid || isLoading}

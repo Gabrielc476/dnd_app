@@ -107,7 +107,7 @@ export function useCharacter({
   );
 
   /**
-   * Fetch all characters for the campaign
+   * Fetch characters - uses different endpoints based on campaignId
    */
   const fetchCharacters = useCallback(async (): Promise<
     CharacterListItem[]
@@ -115,11 +115,22 @@ export function useCharacter({
     setIsLoading(true);
     setError(null);
     try {
-      const data = await charactersAPI.listCampaignCharacters(campaignId);
+      let data: CharacterListItem[];
+
+      // If campaignId is empty or not provided, fetch all user characters
+      if (!campaignId || campaignId.trim() === "") {
+        console.log("📋 Fetching all user characters...");
+        data = await charactersAPI.listMyCharacters();
+      } else {
+        console.log(`📋 Fetching characters for campaign: ${campaignId}`);
+        data = await charactersAPI.listCampaignCharacters(campaignId);
+      }
+
       setCharacters(data);
       setIsLoading(false);
       return data;
     } catch (err: any) {
+      console.error("❌ Error fetching characters:", err);
       setError(err.message || "Failed to fetch characters");
       setIsLoading(false);
       return [];

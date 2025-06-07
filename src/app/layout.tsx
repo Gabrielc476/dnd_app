@@ -1,4 +1,4 @@
-// src/app/layout.tsx
+// src/app/layout.tsx - FIXED VERSION
 "use client";
 
 import React, { useEffect, useState } from "react";
@@ -150,6 +150,11 @@ function Sidebar({ className }: { className?: string }) {
   const pathname = usePathname();
   const currentCampaign = useGameStore((state) => state.currentCampaign);
 
+  // Safe access to campaign properties
+  const campaignName = currentCampaign?.name || "No Campaign";
+  const playerCount = currentCampaign?.players?.length || 0;
+  const hasActiveEncounter = currentCampaign?.active_encounter;
+
   return (
     <div className={`pb-12 ${className}`}>
       <div className="space-y-4 py-4">
@@ -158,13 +163,13 @@ function Sidebar({ className }: { className?: string }) {
           <div className="px-3 py-2">
             <div className="space-y-1">
               <h2 className="mb-2 px-4 text-lg font-semibold tracking-tight">
-                {currentCampaign.name}
+                {campaignName}
               </h2>
               <div className="space-y-1">
                 <Badge variant="secondary" className="text-xs">
-                  {currentCampaign.players.length} Players
+                  {playerCount} Players
                 </Badge>
-                {currentCampaign.active_encounter && (
+                {hasActiveEncounter && (
                   <Badge variant="default" className="text-xs ml-2">
                     Active Encounter
                   </Badge>
@@ -214,7 +219,8 @@ function Header() {
 
   const [showMobileMenu, setShowMobileMenu] = useState(false);
 
-  const unreadNotifications = notifications.filter(
+  // Safe access to notifications
+  const unreadNotifications = (notifications || []).filter(
     (n) => n.type === "error" || n.type === "warning"
   ).length;
 
@@ -246,7 +252,7 @@ function Header() {
         <div className="ml-auto flex items-center space-x-4">
           {/* Connection Status */}
           <div className="flex items-center space-x-2">
-            {wsStatus.connected ? (
+            {wsStatus?.connected ? (
               <div className="flex items-center text-green-600">
                 <Wifi className="h-4 w-4 mr-1" />
                 <span className="text-xs hidden sm:inline">Connected</span>
@@ -277,7 +283,7 @@ function Header() {
             <DropdownMenuContent align="end" className="w-80">
               <div className="flex items-center justify-between p-2">
                 <h4 className="font-semibold">Notifications</h4>
-                {notifications.length > 0 && (
+                {(notifications || []).length > 0 && (
                   <Button
                     variant="ghost"
                     size="sm"
@@ -289,13 +295,13 @@ function Header() {
               </div>
               <Separator />
               <ScrollArea className="h-[300px]">
-                {notifications.length === 0 ? (
+                {(notifications || []).length === 0 ? (
                   <div className="p-4 text-center text-muted-foreground">
                     No notifications
                   </div>
                 ) : (
                   <div className="space-y-1">
-                    {notifications.map((notification) => (
+                    {(notifications || []).map((notification) => (
                       <div
                         key={notification.id}
                         className={`p-3 border-l-2 ${

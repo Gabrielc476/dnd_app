@@ -107,10 +107,10 @@ export default function CharactersPage() {
   const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
   const [filters, setFilters] = useState<CharacterFilters>({
     search: "",
-    class: "",
-    race: "",
-    level: "",
-    campaign: "",
+    class: "all",
+    race: "all",
+    level: "all",
+    campaign: "all",
   });
   const [filteredCharacters, setFilteredCharacters] = useState<
     CharacterListItem[]
@@ -141,20 +141,20 @@ export default function CharactersPage() {
       );
     }
 
-    if (filters.class) {
+    if (filters.class && filters.class !== "all") {
       filtered = filtered.filter((char) => char.class === filters.class);
     }
 
-    if (filters.race) {
+    if (filters.race && filters.race !== "all") {
       filtered = filtered.filter((char) => char.race === filters.race);
     }
 
-    if (filters.level) {
+    if (filters.level && filters.level !== "all") {
       const level = parseInt(filters.level);
       filtered = filtered.filter((char) => char.level === level);
     }
 
-    if (filters.campaign) {
+    if (filters.campaign && filters.campaign !== "all") {
       filtered = filtered.filter(
         (char) => char.campaign_id === filters.campaign
       );
@@ -252,10 +252,10 @@ export default function CharactersPage() {
   const resetFilters = () => {
     setFilters({
       search: "",
-      class: "",
-      race: "",
-      level: "",
-      campaign: "",
+      class: "all",
+      race: "all",
+      level: "all",
+      campaign: "all",
     });
   };
 
@@ -514,7 +514,7 @@ export default function CharactersPage() {
                   <SelectValue placeholder="Class" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All Classes</SelectItem>
+                  <SelectItem value="all">All Classes</SelectItem>
                   {uniqueClasses.map((cls) => (
                     <SelectItem key={cls} value={cls}>
                       {cls}
@@ -533,7 +533,7 @@ export default function CharactersPage() {
                   <SelectValue placeholder="Race" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All Races</SelectItem>
+                  <SelectItem value="all">All Races</SelectItem>
                   {uniqueRaces.map((race) => (
                     <SelectItem key={race} value={race}>
                       {race}
@@ -552,7 +552,7 @@ export default function CharactersPage() {
                   <SelectValue placeholder="Level" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All</SelectItem>
+                  <SelectItem value="all">All Levels</SelectItem>
                   {uniqueLevels.map((level) => (
                     <SelectItem key={level} value={level.toString()}>
                       {level}
