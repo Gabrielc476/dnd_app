@@ -1,9 +1,9 @@
-// src/app/auth/page.tsx
+// src/app/auth/page.tsx - VERSÃO CORRIGIDA
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Dice6, Eye, EyeOff, UserPlus, LogIn } from "lucide-react";
+import { Dice6, Eye, EyeOff, UserPlus, LogIn, Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 
@@ -25,14 +25,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function AuthPage() {
   const router = useRouter();
-  const { login, register, isLoading } = useAuth();
+  const { login, register, isLoading, isAuthenticated } = useAuth();
   const { toast } = useToast();
 
+  // ✅ Estados do formulário
   const [showPassword, setShowPassword] = useState(false);
-  const [loginForm, setLoginForm] = useState({ username: "", password: "" });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loginForm, setLoginForm] = useState({
+    username: "",
+    password: "",
+  });
   const [registerForm, setRegisterForm] = useState({
     username: "",
     email: "",
@@ -40,59 +46,90 @@ export default function AuthPage() {
     role: "player" as "player" | "dm",
   });
 
+  // ✅ Redirecionamento automático se já autenticado
+  useEffect(() => {
+    if (isAuthenticated && !isLoading) {
+      console.log("✅ Usuário já autenticado, redirecionando...");
+      router.replace("/dashboard");
+    }
+  }, [isAuthenticated, isLoading, router]);
+
+  // ✅ LOGIN MELHORADO
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("🔐 Formulário de login submetido");
 
-    if (!loginForm.username || !loginForm.password) {
+    if (isSubmitting || isLoading) {
+      return;
+    }
+
+    console.log("🔐 Tentativa de login para:", loginForm.username);
+
+    // ✅ Validação básica
+    if (!loginForm.username.trim() || !loginForm.password.trim()) {
       toast({
-        title: "Erro",
-        description: "Preencha todos os campos",
+        title: "Campos obrigatórios",
+        description: "Preencha usuário e senha",
         variant: "destructive",
       });
       return;
     }
 
-    console.log("📝 Iniciando login para usuário:", loginForm.username);
+    setIsSubmitting(true);
 
-    const success = await login(loginForm.username, loginForm.password);
+    try {
+      const success = await login(
+        loginForm.username.trim(),
+        loginForm.password
+      );
 
-    console.log("🎯 Resultado do login:", success);
+      if (success) {
+        toast({
+          title: "Login realizado!",
+          description: "Redirecionando para o dashboard...",
+        });
 
-    if (success) {
-      toast({
-        title: "Bem-vindo!",
-        description: "Login realizado com sucesso",
-      });
+        // ✅ Aguardar um pouco antes de redirecionar
+        setTimeout(() => {
+          router.replace("/dashboard");
+        }, 1000);
+      } else {
+        toast({
+          title: "Erro no login",
+          description: "Usuário ou senha incorretos",
+          variant: "destructive",
+        });
 
-      console.log("🚀 Redirecionando para dashboard...");
-
-      // Aguardar um pequeno delay para garantir que o estado foi atualizado
-      setTimeout(() => {
-        router.push("/dashboard");
-      }, 500);
-    } else {
+        // ✅ Limpar apenas a senha em caso de erro
+        setLoginForm((prev) => ({ ...prev, password: "" }));
+      }
+    } catch (error) {
+      console.error("❌ Erro no login:", error);
       toast({
         title: "Erro no login",
-        description: "Usuário ou senha incorretos",
+        description: "Ocorreu um erro inesperado. Tente novamente.",
         variant: "destructive",
       });
-
-      // Reset form only on error
-      setLoginForm({ username: "", password: "" });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
+  // ✅ REGISTER MELHORADO
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (isSubmitting || isLoading) {
+      return;
+    }
+
+    // ✅ Validação
     if (
-      !registerForm.username ||
-      !registerForm.email ||
-      !registerForm.password
+      !registerForm.username.trim() ||
+      !registerForm.email.trim() ||
+      !registerForm.password.trim()
     ) {
       toast({
-        title: "Erro",
+        title: "Campos obrigatórios",
         description: "Preencha todos os campos",
         variant: "destructive",
       });
@@ -101,29 +138,107 @@ export default function AuthPage() {
 
     if (registerForm.password.length < 6) {
       toast({
-        title: "Erro",
+        title: "Senha muito curta",
         description: "A senha deve ter pelo menos 6 caracteres",
         variant: "destructive",
       });
       return;
     }
 
-    const success = await register(registerForm);
-    if (success) {
+    // ✅ Validação básica de email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(registerForm.email)) {
       toast({
-        title: "Conta criada!",
-        description: "Agora você pode fazer login",
-      });
-      // Switch to login tab
-      setLoginForm({ username: registerForm.username, password: "" });
-    } else {
-      toast({
-        title: "Erro no cadastro",
-        description: "Não foi possível criar a conta",
+        title: "Email inválido",
+        description: "Digite um email válido",
         variant: "destructive",
       });
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const success = await register({
+        username: registerForm.username.trim(),
+        email: registerForm.email.trim(),
+        password: registerForm.password,
+        role: registerForm.role,
+      });
+
+      if (success) {
+        toast({
+          title: "Conta criada!",
+          description: "Agora você pode fazer login",
+        });
+
+        // ✅ Mudar para aba de login e preencher o usuário
+        setLoginForm({
+          username: registerForm.username,
+          password: "",
+        });
+
+        // ✅ Reset do formulário de registro
+        setRegisterForm({
+          username: "",
+          email: "",
+          password: "",
+          role: "player",
+        });
+      } else {
+        toast({
+          title: "Erro no cadastro",
+          description: "Não foi possível criar a conta. Tente novamente.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error("❌ Erro no registro:", error);
+      toast({
+        title: "Erro no cadastro",
+        description: "Ocorreu um erro inesperado. Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
     }
   };
+
+  // ✅ Se já estiver autenticado, mostrar loading
+  if (isAuthenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
+        <Card className="w-full max-w-md text-center">
+          <CardContent className="pt-6">
+            <div className="flex flex-col items-center gap-4">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="text-muted-foreground">
+                Você já está logado. Redirecionando...
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // ✅ Mostrar loading durante inicialização
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
+        <Card className="w-full max-w-md text-center">
+          <CardContent className="pt-6">
+            <div className="flex flex-col items-center gap-4">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="text-muted-foreground">Carregando...</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const isFormDisabled = isSubmitting || isLoading;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
@@ -141,11 +256,11 @@ export default function AuthPage() {
         <CardContent>
           <Tabs defaultValue="login" className="w-full">
             <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="login">
+              <TabsTrigger value="login" disabled={isFormDisabled}>
                 <LogIn className="h-4 w-4 mr-2" />
                 Entrar
               </TabsTrigger>
-              <TabsTrigger value="register">
+              <TabsTrigger value="register" disabled={isFormDisabled}>
                 <UserPlus className="h-4 w-4 mr-2" />
                 Cadastrar
               </TabsTrigger>
@@ -166,6 +281,7 @@ export default function AuthPage() {
                       }))
                     }
                     placeholder="Seu nome de usuário"
+                    disabled={isFormDisabled}
                     required
                   />
                 </div>
@@ -184,6 +300,7 @@ export default function AuthPage() {
                         }))
                       }
                       placeholder="Sua senha"
+                      disabled={isFormDisabled}
                       required
                     />
                     <Button
@@ -192,6 +309,7 @@ export default function AuthPage() {
                       size="sm"
                       className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
                       onClick={() => setShowPassword(!showPassword)}
+                      disabled={isFormDisabled}
                     >
                       {showPassword ? (
                         <EyeOff className="h-4 w-4" />
@@ -202,8 +320,19 @@ export default function AuthPage() {
                   </div>
                 </div>
 
-                <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? "Entrando..." : "Entrar"}
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={isFormDisabled}
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Entrando...
+                    </>
+                  ) : (
+                    "Entrar"
+                  )}
                 </Button>
               </form>
             </TabsContent>
@@ -223,6 +352,7 @@ export default function AuthPage() {
                       }))
                     }
                     placeholder="Nome de usuário"
+                    disabled={isFormDisabled}
                     required
                   />
                 </div>
@@ -240,6 +370,7 @@ export default function AuthPage() {
                       }))
                     }
                     placeholder="seu@email.com"
+                    disabled={isFormDisabled}
                     required
                   />
                 </div>
@@ -258,6 +389,7 @@ export default function AuthPage() {
                         }))
                       }
                       placeholder="Mínimo 6 caracteres"
+                      disabled={isFormDisabled}
                       required
                       minLength={6}
                     />
@@ -267,6 +399,7 @@ export default function AuthPage() {
                       size="sm"
                       className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
                       onClick={() => setShowPassword(!showPassword)}
+                      disabled={isFormDisabled}
                     >
                       {showPassword ? (
                         <EyeOff className="h-4 w-4" />
@@ -284,6 +417,7 @@ export default function AuthPage() {
                     onValueChange={(value: "player" | "dm") =>
                       setRegisterForm((prev) => ({ ...prev, role: value }))
                     }
+                    disabled={isFormDisabled}
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -295,12 +429,31 @@ export default function AuthPage() {
                   </Select>
                 </div>
 
-                <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? "Criando conta..." : "Criar conta"}
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={isFormDisabled}
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Criando conta...
+                    </>
+                  ) : (
+                    "Criar conta"
+                  )}
                 </Button>
               </form>
             </TabsContent>
           </Tabs>
+
+          {/* ✅ Dicas de uso */}
+          <div className="mt-6 p-4 bg-muted rounded-lg">
+            <p className="text-sm text-muted-foreground text-center">
+              <strong>Dica:</strong> Crie uma conta como "Mestre (DM)" para
+              criar campanhas, ou como "Jogador" para participar de aventuras.
+            </p>
+          </div>
         </CardContent>
       </Card>
     </div>

@@ -1,10 +1,10 @@
 // =====================================================
-// 1. CORREÇÃO PRINCIPAL: src/hooks/useAuth.ts
+// HOOK useAuth CORRIGIDO - src/hooks/useAuth.ts
 // =====================================================
 
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { authAPI } from "@/lib/api";
 import { User, AuthToken } from "@/lib/types";
 import { useRouter } from "next/navigation";
@@ -27,121 +27,145 @@ export interface UseAuthReturn {
 
 export function useAuth(): UseAuthReturn {
   const router = useRouter();
+
+  // ✅ Estados centralizados
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Calcular isAuthenticated baseado nos estados atuais
+  // ✅ Ref para evitar múltiplas inicializações
+  const hasInitialized = useRef(false);
+  const isRefreshing = useRef(false);
+
+  // ✅ Calcular isAuthenticated de forma mais robusta
   const isAuthenticated = Boolean(user && token);
 
   /**
-   * Load user from localStorage and validate token
+   * ✅ INICIALIZAÇÃO ÚNICA E SEGURA
    */
   useEffect(() => {
-    const loadUser = async () => {
-      console.log("🔄 Carregando dados do usuário...");
+    if (hasInitialized.current) {
+      return;
+    }
 
-      const storedToken = localStorage.getItem("authToken");
-      const storedUser = localStorage.getItem("user");
+    const initializeAuth = async () => {
+      console.log("🔄 Inicializando autenticação...");
+      hasInitialized.current = true;
 
-      if (storedToken && storedUser) {
-        try {
-          console.log("📦 Token e usuário encontrados no localStorage");
+      try {
+        const storedToken = localStorage.getItem("authToken");
+        const storedUser = localStorage.getItem("user");
 
-          // Set initial state from localStorage
-          setToken(storedToken);
-          const parsedUser = JSON.parse(storedUser);
-          setUser(parsedUser);
-
-          console.log("✅ Dados iniciais carregados:", parsedUser);
-
-          // Verify token is still valid (optional - can be skipped for faster loading)
-          try {
-            const userData = await authAPI.getMe();
-            setUser(userData);
-            localStorage.setItem("user", JSON.stringify(userData));
-            console.log("✅ Token validado e dados atualizados");
-          } catch (validationError) {
-            console.warn(
-              "⚠️ Erro na validação do token, mas mantendo dados locais:",
-              validationError
-            );
-            // Não fazer logout imediatamente, manter os dados do localStorage
-            // O usuário ainda pode usar a aplicação com os dados em cache
-          }
-        } catch (error) {
-          console.error("❌ Erro ao carregar dados do localStorage:", error);
-          logout();
+        if (!storedToken || !storedUser) {
+          console.log("📭 Nenhum token ou usuário armazenado");
+          setIsLoading(false);
+          return;
         }
-      } else {
-        console.log("📭 Nenhum token ou usuário encontrado no localStorage");
-      }
 
-      setIsLoading(false);
+        console.log("📦 Dados encontrados no localStorage");
+
+        // ✅ Parse do usuário armazenado
+        let parsedUser: User;
+        try {
+          parsedUser = JSON.parse(storedUser);
+        } catch (parseError) {
+          console.error("❌ Erro ao fazer parse do usuário:", parseError);
+          clearAuthData();
+          setIsLoading(false);
+          return;
+        }
+
+        // ✅ Definir estados iniciais
+        setToken(storedToken);
+        setUser(parsedUser);
+
+        console.log("✅ Estados iniciais definidos");
+
+        // ✅ Validar token (opcional e sem bloquear)
+        try {
+          console.log("🔍 Validando token...");
+          const freshUserData = await authAPI.getMe();
+
+          // ✅ Atualizar com dados frescos
+          setUser(freshUserData);
+          localStorage.setItem("user", JSON.stringify(freshUserData));
+
+          console.log("✅ Token validado e dados atualizados");
+        } catch (validationError) {
+          console.warn("⚠️ Erro na validação do token:", validationError);
+          // ✅ Manter dados locais mesmo com erro de validação
+          // O usuário pode continuar usando a aplicação
+        }
+      } catch (error) {
+        console.error("❌ Erro na inicialização:", error);
+        clearAuthData();
+      } finally {
+        setIsLoading(false);
+      }
     };
 
-    loadUser();
+    initializeAuth();
   }, []);
 
   /**
-   * Login user
+   * ✅ FUNÇÃO PARA LIMPAR DADOS DE AUTENTICAÇÃO
+   */
+  const clearAuthData = useCallback(() => {
+    console.log("🧹 Limpando dados de autenticação");
+    localStorage.removeItem("authToken");
+    localStorage.removeItem("user");
+    setUser(null);
+    setToken(null);
+  }, []);
+
+  /**
+   * ✅ LOGIN MELHORADO
    */
   const login = useCallback(
     async (username: string, password: string): Promise<boolean> => {
-      console.log("🚀 Iniciando processo de login...");
+      console.log("🚀 Iniciando login para:", username);
+
+      if (isLoading) {
+        console.log("⏳ Sistema ainda carregando, aguarde");
+        return false;
+      }
+
       setIsLoading(true);
 
       try {
-        console.log("📡 Enviando credenciais para API...");
+        // ✅ Fazer login
+        console.log("📡 Enviando credenciais...");
         const authData = await authAPI.login(username, password);
-        console.log("✅ Resposta da API recebida:", authData);
 
-        // Save token immediately
+        // ✅ Salvar token imediatamente
         console.log("💾 Salvando token...");
         localStorage.setItem("authToken", authData.access_token);
         setToken(authData.access_token);
 
-        // Fetch user details
+        // ✅ Buscar dados do usuário
         console.log("👤 Buscando dados do usuário...");
         const userData = await authAPI.getMe();
-        console.log("✅ Dados do usuário recebidos:", userData);
 
-        // Save user data
+        // ✅ Salvar dados do usuário
         setUser(userData);
         localStorage.setItem("user", JSON.stringify(userData));
 
         console.log("🎉 Login realizado com sucesso!");
-        console.log(
-          "📊 Estado final - Token:",
-          !!authData.access_token,
-          "User:",
-          !!userData
-        );
 
         setIsLoading(false);
-
-        // Force a small delay to ensure state is updated
-        await new Promise((resolve) => setTimeout(resolve, 100));
-
         return true;
       } catch (error) {
         console.error("❌ Erro no login:", error);
-
-        // Clear any partial state
-        localStorage.removeItem("authToken");
-        localStorage.removeItem("user");
-        setUser(null);
-        setToken(null);
-
+        clearAuthData();
         setIsLoading(false);
         return false;
       }
     },
-    []
+    [isLoading, clearAuthData]
   );
 
   /**
-   * Register new user
+   * ✅ REGISTER SIMPLIFICADO
    */
   const register = useCallback(
     async (userData: {
@@ -150,57 +174,76 @@ export function useAuth(): UseAuthReturn {
       password: string;
       role: string;
     }): Promise<boolean> => {
+      if (isLoading) return false;
+
       setIsLoading(true);
       try {
         await authAPI.register(userData);
         setIsLoading(false);
         return true;
       } catch (error) {
-        console.error("Registration failed:", error);
+        console.error("❌ Erro no registro:", error);
         setIsLoading(false);
         return false;
       }
     },
-    []
+    [isLoading]
   );
 
   /**
-   * Logout user
+   * ✅ LOGOUT MELHORADO
    */
   const logout = useCallback(() => {
     console.log("🚪 Fazendo logout...");
-    localStorage.removeItem("authToken");
-    localStorage.removeItem("user");
-    setUser(null);
-    setToken(null);
-    router.push("/auth");
-  }, [router]);
+    clearAuthData();
+
+    // ✅ Redirecionamento seguro
+    setTimeout(() => {
+      router.replace("/auth");
+    }, 100);
+  }, [clearAuthData, router]);
 
   /**
-   * Refresh token
+   * ✅ REFRESH TOKEN COM PROTEÇÃO
    */
   const refreshToken = useCallback(async (): Promise<boolean> => {
+    if (isRefreshing.current) {
+      console.log("🔄 Refresh já em andamento");
+      return false;
+    }
+
+    isRefreshing.current = true;
+
     try {
       const authData = await authAPI.refreshToken();
       localStorage.setItem("authToken", authData.access_token);
       setToken(authData.access_token);
+
+      console.log("✅ Token atualizado com sucesso");
       return true;
     } catch (error) {
-      console.error("Token refresh failed:", error);
+      console.error("❌ Erro ao atualizar token:", error);
       logout();
       return false;
+    } finally {
+      isRefreshing.current = false;
     }
   }, [logout]);
 
-  // Debug log do estado atual
+  // ✅ Debug log com throttling
   useEffect(() => {
-    console.log("📊 Estado de autenticação atualizado:", {
-      hasUser: !!user,
-      hasToken: !!token,
-      isAuthenticated,
-      isLoading,
-      userName: user?.username,
-    });
+    const logTimer = setTimeout(() => {
+      console.log("📊 Estado de autenticação:", {
+        hasUser: !!user,
+        hasToken: !!token,
+        isAuthenticated,
+        isLoading,
+        userName: user?.username,
+        userRole: user?.role,
+      });
+    }, 100);
+
+    return () => clearTimeout(logTimer);
   }, [user, token, isAuthenticated, isLoading]);
 
   return {
