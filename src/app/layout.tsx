@@ -1,4 +1,4 @@
-// src/app/layout.tsx - VERSÃO CORRIGIDA - ROTEAMENTO FIXADO
+// src/app/layout.tsx - LAYOUT COMPLETO SIMPLIFICADO
 "use client";
 
 import React, { useEffect, useState, useRef } from "react";
@@ -19,6 +19,7 @@ import {
   User,
   Wifi,
   WifiOff,
+  CheckCircle,
 } from "lucide-react";
 
 // Styles
@@ -36,6 +37,13 @@ import { Toaster } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -97,106 +105,24 @@ const navigationItems = [
   },
 ];
 
-// ✅ AUTHGUARD CORRIGIDO - SEM REDIRECIONAMENTO AUTOMÁTICO DA HOME
+// ✅ AUTHGUARD SIMPLIFICADO - APENAS PROTEÇÃO, SEM REDIRECIONAMENTOS AUTOMÁTICOS
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { user, isLoading, isAuthenticated } = useAuth();
-  const router = useRouter();
   const pathname = usePathname();
 
-  // ✅ Prevenir redirecionamentos múltiplos
-  const hasRedirectedRef = useRef(false);
-  const lastPathRef = useRef(pathname);
-
-  // ✅ Reset redirect flag quando o path muda
-  useEffect(() => {
-    if (lastPathRef.current !== pathname) {
-      hasRedirectedRef.current = false;
-      lastPathRef.current = pathname;
-    }
-  }, [pathname]);
-
-  // ✅ Lógica de redirecionamento corrigida
-  useEffect(() => {
-    // ✅ Não fazer nada enquanto ainda está carregando
-    if (isLoading) {
-      console.log("🔄 AuthGuard: Ainda carregando...");
-      return;
-    }
-
-    // ✅ Não redirecionar se já redirecionou recentemente
-    if (hasRedirectedRef.current) {
-      console.log("🚫 AuthGuard: Redirecionamento já feito, ignorando");
-      return;
-    }
-
-    // ✅ Rotas públicas (acessíveis por todos)
-    const publicRoutes = ["/", "/auth"];
-    const isPublicRoute = publicRoutes.some(
-      (route) => pathname === route || pathname.startsWith("/auth")
-    );
-
-    // ✅ Rotas que requerem autenticação
-    const protectedRoutes = [
-      "/dashboard",
-      "/characters",
-      "/campaign",
-      "/npcs",
-      "/combat",
-      "/compendium",
-      "/settings",
-      "/profile",
-    ];
-    const isProtectedRoute = protectedRoutes.some((route) =>
-      pathname.startsWith(route)
-    );
-
-    console.log("🛡️ AuthGuard - Verificação:", {
-      isAuthenticated,
-      isPublicRoute,
-      isProtectedRoute,
-      pathname,
-      hasUser: !!user,
-    });
-
-    // ✅ CASO 1: Não autenticado tentando acessar rota protegida
-    if (!isAuthenticated && isProtectedRoute) {
-      console.log(
-        "🚫 Não autenticado em rota protegida, redirecionando para /auth"
-      );
-      hasRedirectedRef.current = true;
-      router.replace("/auth");
-      return;
-    }
-
-    // ✅ CASO 2: Autenticado tentando acessar página de auth (apenas /auth, não home)
-    if (isAuthenticated && pathname.startsWith("/auth")) {
-      console.log(
-        "✅ Já autenticado na página de auth, redirecionando para /dashboard"
-      );
-      hasRedirectedRef.current = true;
-      router.replace("/dashboard");
-      return;
-    }
-
-    // ✅ CASO 3: REMOVIDO - Não redirecionar mais da home automaticamente
-    // Usuários autenticados PODEM ver a landing page se quiserem
-  }, [isLoading, isAuthenticated, pathname, router, user]);
-
-  // ✅ Mostrar loading enquanto carrega OU se está redirecionando
-  if (isLoading || hasRedirectedRef.current) {
+  // ✅ Mostrar loading enquanto carrega
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="flex flex-col items-center gap-4">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-          <span className="text-muted-foreground">
-            {isLoading ? "Loading..." : "Redirecting..."}
-          </span>
+          <span className="text-muted-foreground">Loading...</span>
         </div>
       </div>
     );
   }
 
-  // ✅ Verificação final: se não autenticado em rota protegida, não renderizar
+  // ✅ Rotas que requerem autenticação
   const protectedRoutes = [
     "/dashboard",
     "/characters",
@@ -211,8 +137,26 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
     pathname.startsWith(route)
   );
 
+  // ✅ Se não autenticado em rota protegida, mostrar mensagem em vez de redirecionar
   if (!isAuthenticated && isProtectedRoute) {
-    return null; // Não renderizar nada, redirecionamento será feito
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
+        <Card className="w-full max-w-md text-center">
+          <CardContent className="pt-6">
+            <div className="flex flex-col items-center gap-4">
+              <Shield className="h-16 w-16 text-muted-foreground" />
+              <h3 className="text-lg font-medium">Authentication Required</h3>
+              <p className="text-muted-foreground text-center">
+                You need to be logged in to access this page.
+              </p>
+              <Button onClick={() => (window.location.href = "/auth")}>
+                Go to Login
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   return <>{children}</>;
@@ -265,12 +209,10 @@ function Sidebar({ className }: { className?: string }) {
                 key={item.href}
                 variant={pathname === item.href ? "secondary" : "ghost"}
                 className="w-full justify-start"
-                asChild
+                onClick={() => (window.location.href = item.href)}
               >
-                <a href={item.href}>
-                  <item.icon className="mr-2 h-4 w-4" />
-                  {item.title}
-                </a>
+                <item.icon className="mr-2 h-4 w-4" />
+                {item.title}
               </Button>
             ))}
           </div>
@@ -441,17 +383,17 @@ function Header() {
                   </div>
                 </div>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem asChild>
-                  <a href="/profile">
-                    <User className="mr-2 h-4 w-4" />
-                    Profile
-                  </a>
+                <DropdownMenuItem
+                  onClick={() => (window.location.href = "/profile")}
+                >
+                  <User className="mr-2 h-4 w-4" />
+                  Profile
                 </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <a href="/settings">
-                    <Settings className="mr-2 h-4 w-4" />
-                    Settings
-                  </a>
+                <DropdownMenuItem
+                  onClick={() => (window.location.href = "/settings")}
+                >
+                  <Settings className="mr-2 h-4 w-4" />
+                  Settings
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => logout()}>
@@ -467,14 +409,14 @@ function Header() {
   );
 }
 
-// ✅ MAIN LAYOUT CORRIGIDO
+// ✅ MAIN LAYOUT SIMPLIFICADO
 function MainLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
   const pathname = usePathname();
   const currentCampaign = useGameStore((state) => state.currentCampaign);
 
   // ✅ Páginas que devem usar layout mínimo (sem sidebar/header)
-  const minimalLayoutRoutes = ["/", "/auth"];
+  const minimalLayoutRoutes = ["/", "/auth", "/unauthorized"];
   const useMinimalLayout = minimalLayoutRoutes.some(
     (route) => pathname === route || pathname.startsWith("/auth")
   );
@@ -484,7 +426,7 @@ function MainLayout({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  // ✅ Se não for autenticado em página privada, não renderizar layout completo
+  // ✅ Se não for autenticado em página protegida, AuthGuard vai lidar
   const protectedRoutes = [
     "/dashboard",
     "/characters",
@@ -518,14 +460,23 @@ function MainLayout({ children }: { children: React.ReactNode }) {
         <Header />
 
         {/* No Campaign Warning - apenas para páginas que precisam de campanha */}
-        {!currentCampaign && pathname !== "/campaign" && (
-          <Alert className="m-4">
-            <AlertDescription>
-              No active campaign selected. Please select or create a campaign to
-              access all features.
-            </AlertDescription>
-          </Alert>
-        )}
+        {!currentCampaign &&
+          pathname !== "/campaign" &&
+          pathname !== "/dashboard" && (
+            <Alert className="m-4">
+              <AlertDescription>
+                No active campaign selected.{" "}
+                <Button
+                  variant="link"
+                  className="p-0 h-auto"
+                  onClick={() => (window.location.href = "/campaign")}
+                >
+                  Select or create a campaign
+                </Button>{" "}
+                to access all features.
+              </AlertDescription>
+            </Alert>
+          )}
 
         {/* Main Content Area */}
         <main className="flex-1 overflow-x-hidden overflow-y-auto bg-background">

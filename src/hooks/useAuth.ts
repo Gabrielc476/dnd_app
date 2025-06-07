@@ -35,13 +35,12 @@ export function useAuth(): UseAuthReturn {
 
   // ✅ Ref para evitar múltiplas inicializações
   const hasInitialized = useRef(false);
-  const isRefreshing = useRef(false);
 
-  // ✅ Calcular isAuthenticated de forma mais robusta
+  // ✅ Calcular isAuthenticated
   const isAuthenticated = Boolean(user && token);
 
   /**
-   * ✅ INICIALIZAÇÃO ÚNICA E SEGURA
+   * ✅ INICIALIZAÇÃO SIMPLIFICADA - SEM REDIRECIONAMENTOS
    */
   useEffect(() => {
     if (hasInitialized.current) {
@@ -79,7 +78,9 @@ export function useAuth(): UseAuthReturn {
         setToken(storedToken);
         setUser(parsedUser);
 
-        console.log("✅ Estados iniciais definidos");
+        console.log(
+          "✅ Estados iniciais definidos - SEM redirecionamento automático"
+        );
 
         // ✅ Validar token (opcional e sem bloquear)
         try {
@@ -94,7 +95,6 @@ export function useAuth(): UseAuthReturn {
         } catch (validationError) {
           console.warn("⚠️ Erro na validação do token:", validationError);
           // ✅ Manter dados locais mesmo com erro de validação
-          // O usuário pode continuar usando a aplicação
         }
       } catch (error) {
         console.error("❌ Erro na inicialização:", error);
@@ -108,18 +108,7 @@ export function useAuth(): UseAuthReturn {
   }, []);
 
   /**
-   * ✅ FUNÇÃO PARA LIMPAR DADOS DE AUTENTICAÇÃO
-   */
-  const clearAuthData = useCallback(() => {
-    console.log("🧹 Limpando dados de autenticação");
-    localStorage.removeItem("authToken");
-    localStorage.removeItem("user");
-    setUser(null);
-    setToken(null);
-  }, []);
-
-  /**
-   * ✅ LOGIN MELHORADO
+   * ✅ LOGIN - COM REDIRECIONAMENTO APENAS APÓS SUCESSO
    */
   const login = useCallback(
     async (username: string, password: string): Promise<boolean> => {
@@ -165,8 +154,27 @@ export function useAuth(): UseAuthReturn {
   );
 
   /**
-   * ✅ REGISTER SIMPLIFICADO
+   * ✅ LOGOUT - COM REDIRECIONAMENTO APENAS PARA LOGIN
    */
+  const logout = useCallback(() => {
+    console.log("🚪 Fazendo logout...");
+    clearAuthData();
+
+    // ✅ Redirecionamento apenas para página de login
+    setTimeout(() => {
+      router.replace("/auth");
+    }, 100);
+  }, [clearAuthData, router]);
+
+  // Resto do código permanece igual...
+  const clearAuthData = useCallback(() => {
+    console.log("🧹 Limpando dados de autenticação");
+    localStorage.removeItem("authToken");
+    localStorage.removeItem("user");
+    setUser(null);
+    setToken(null);
+  }, []);
+
   const register = useCallback(
     async (userData: {
       username: string;
@@ -190,61 +198,19 @@ export function useAuth(): UseAuthReturn {
     [isLoading]
   );
 
-  /**
-   * ✅ LOGOUT MELHORADO
-   */
-  const logout = useCallback(() => {
-    console.log("🚪 Fazendo logout...");
-    clearAuthData();
-
-    // ✅ Redirecionamento seguro
-    setTimeout(() => {
-      router.replace("/auth");
-    }, 100);
-  }, [clearAuthData, router]);
-
-  /**
-   * ✅ REFRESH TOKEN COM PROTEÇÃO
-   */
   const refreshToken = useCallback(async (): Promise<boolean> => {
-    if (isRefreshing.current) {
-      console.log("🔄 Refresh já em andamento");
-      return false;
-    }
-
-    isRefreshing.current = true;
-
     try {
       const authData = await authAPI.refreshToken();
       localStorage.setItem("authToken", authData.access_token);
       setToken(authData.access_token);
-
       console.log("✅ Token atualizado com sucesso");
       return true;
     } catch (error) {
       console.error("❌ Erro ao atualizar token:", error);
       logout();
       return false;
-    } finally {
-      isRefreshing.current = false;
     }
   }, [logout]);
-
-  // ✅ Debug log com throttling
-  useEffect(() => {
-    const logTimer = setTimeout(() => {
-      console.log("📊 Estado de autenticação:", {
-        hasUser: !!user,
-        hasToken: !!token,
-        isAuthenticated,
-        isLoading,
-        userName: user?.username,
-        userRole: user?.role,
-      });
-    }, 100);
-
-    return () => clearTimeout(logTimer);
-  }, [user, token, isAuthenticated, isLoading]);
 
   return {
     user,
