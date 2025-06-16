@@ -1,227 +1,351 @@
-// =====================================================
-// HOOK useAuth CORRIGIDO - src/hooks/useAuth.ts
-// =====================================================
+/**
+ * useAuth Hook - CORRIGIDO
+ * Problemas resolvidos:
+ * 1. ✅ Função getMe() agora está implementada na API
+ * 2. ✅ Proper error handling
+ * 3. ✅ Loading states adequados
+ * 4. ✅ Token validation
+ * 5. ✅ Automatic logout on invalid token
+ */
 
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { authAPI } from "@/lib/api";
-import { User, AuthToken } from "@/lib/types";
-import { useRouter } from "next/navigation";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  createContext,
+  useContext,
+  ReactNode,
+} from "react";
+import { authAPI, AuthenticationError, NetworkError } from "@/lib/api";
+import type { User, LoginCredentials, RegisterData } from "@/lib/api";
 
-export interface UseAuthReturn {
+// Types
+interface AuthState {
   user: User | null;
-  token: string | null;
   isLoading: boolean;
+  error: string | null;
   isAuthenticated: boolean;
-  login: (username: string, password: string) => Promise<boolean>;
-  logout: () => void;
-  register: (userData: {
-    username: string;
-    email: string;
-    password: string;
-    role: string;
-  }) => Promise<boolean>;
-  refreshToken: () => Promise<boolean>;
 }
 
-export function useAuth(): UseAuthReturn {
-  const router = useRouter();
+interface AuthContextType extends AuthState {
+  login: (credentials: LoginCredentials) => Promise<void>;
+  register: (userData: RegisterData) => Promise<void>;
+  logout: () => Promise<void>;
+  validateToken: () => Promise<void>;
+  clearError: () => void;
+  refreshUser: () => Promise<void>;
+}
 
-  // ✅ Estados centralizados
-  const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+// Context
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-  // ✅ Ref para evitar múltiplas inicializações
-  const hasInitialized = useRef(false);
+// Provider Component
+interface AuthProviderProps {
+  children: ReactNode;
+}
 
-  // ✅ Calcular isAuthenticated
-  const isAuthenticated = Boolean(user && token);
+export function AuthProvider({ children }: AuthProviderProps) {
+  const [state, setState] = useState<AuthState>({
+    user: null,
+    isLoading: true,
+    error: null,
+    isAuthenticated: false,
+  });
 
-  /**
-   * ✅ INICIALIZAÇÃO SIMPLIFICADA - SEM REDIRECIONAMENTOS
-   */
+  // Helper function to update state
+  const updateState = useCallback((updates: Partial<AuthState>) => {
+    setState((prev) => ({ ...prev, ...updates }));
+  }, []);
+
+  // Clear error
+  const clearError = useCallback(() => {
+    updateState({ error: null });
+  }, [updateState]);
+
+  // Check if we have a valid token on mount
   useEffect(() => {
-    if (hasInitialized.current) {
-      return;
-    }
-
     const initializeAuth = async () => {
-      console.log("🔄 Inicializando autenticação...");
-      hasInitialized.current = true;
+      const token = localStorage.getItem("authToken");
+
+      if (!token) {
+        updateState({ isLoading: false, isAuthenticated: false });
+        return;
+      }
 
       try {
-        const storedToken = localStorage.getItem("authToken");
-        const storedUser = localStorage.getItem("user");
+        console.log("🔍 Validando token existente...");
+        const userData = await authAPI.getMe();
 
-        if (!storedToken || !storedUser) {
-          console.log("📭 Nenhum token ou usuário armazenado");
-          setIsLoading(false);
-          return;
-        }
+        updateState({
+          user: userData,
+          isLoading: false,
+          isAuthenticated: true,
+          error: null,
+        });
 
-        console.log("📦 Dados encontrados no localStorage");
-
-        // ✅ Parse do usuário armazenado
-        let parsedUser: User;
-        try {
-          parsedUser = JSON.parse(storedUser);
-        } catch (parseError) {
-          console.error("❌ Erro ao fazer parse do usuário:", parseError);
-          clearAuthData();
-          setIsLoading(false);
-          return;
-        }
-
-        // ✅ Definir estados iniciais
-        setToken(storedToken);
-        setUser(parsedUser);
-
-        console.log(
-          "✅ Estados iniciais definidos - SEM redirecionamento automático"
-        );
-
-        // ✅ Validar token (opcional e sem bloquear)
-        try {
-          console.log("🔍 Validando token...");
-          const freshUserData = await authAPI.getMe();
-
-          // ✅ Atualizar com dados frescos
-          setUser(freshUserData);
-          localStorage.setItem("user", JSON.stringify(freshUserData));
-
-          console.log("✅ Token validado e dados atualizados");
-        } catch (validationError) {
-          console.warn("⚠️ Erro na validação do token:", validationError);
-          // ✅ Manter dados locais mesmo com erro de validação
-        }
+        console.log("✅ Token válido, usuário autenticado:", userData.username);
       } catch (error) {
-        console.error("❌ Erro na inicialização:", error);
-        clearAuthData();
-      } finally {
-        setIsLoading(false);
+        console.error("❌ Token inválido:", error);
+
+        // Remove invalid token
+        localStorage.removeItem("authToken");
+
+        updateState({
+          user: null,
+          isLoading: false,
+          isAuthenticated: false,
+          error: null, // Don't show error on initial load
+        });
       }
     };
 
     initializeAuth();
-  }, []);
+  }, [updateState]);
 
-  /**
-   * ✅ LOGIN - COM REDIRECIONAMENTO APENAS APÓS SUCESSO
-   */
+  // Login function
   const login = useCallback(
-    async (username: string, password: string): Promise<boolean> => {
-      console.log("🚀 Iniciando login para:", username);
-
-      if (isLoading) {
-        console.log("⏳ Sistema ainda carregando, aguarde");
-        return false;
-      }
-
-      setIsLoading(true);
-
+    async (credentials: LoginCredentials) => {
       try {
-        // ✅ Fazer login
-        console.log("📡 Enviando credenciais...");
-        const authData = await authAPI.login(username, password);
+        updateState({ isLoading: true, error: null });
+        console.log("🔐 Tentando fazer login...");
 
-        // ✅ Salvar token imediatamente
-        console.log("💾 Salvando token...");
-        localStorage.setItem("authToken", authData.access_token);
-        setToken(authData.access_token);
+        const response = await authAPI.login(credentials);
 
-        // ✅ Buscar dados do usuário
-        console.log("👤 Buscando dados do usuário...");
-        const userData = await authAPI.getMe();
+        updateState({
+          user: response.user,
+          isLoading: false,
+          isAuthenticated: true,
+          error: null,
+        });
 
-        // ✅ Salvar dados do usuário
-        setUser(userData);
-        localStorage.setItem("user", JSON.stringify(userData));
-
-        console.log("🎉 Login realizado com sucesso!");
-
-        setIsLoading(false);
-        return true;
+        console.log("✅ Login realizado com sucesso:", response.user.username);
       } catch (error) {
         console.error("❌ Erro no login:", error);
-        clearAuthData();
-        setIsLoading(false);
-        return false;
+
+        let errorMessage = "Erro ao fazer login";
+
+        if (error instanceof AuthenticationError) {
+          errorMessage = "Email ou senha incorretos";
+        } else if (error instanceof NetworkError) {
+          errorMessage = "Erro de conexão. Verifique sua internet.";
+        } else if (error instanceof Error) {
+          errorMessage = error.message;
+        }
+
+        updateState({
+          user: null,
+          isLoading: false,
+          isAuthenticated: false,
+          error: errorMessage,
+        });
+
+        throw error;
       }
     },
-    [isLoading, clearAuthData]
+    [updateState]
   );
 
-  /**
-   * ✅ LOGOUT - COM REDIRECIONAMENTO APENAS PARA LOGIN
-   */
-  const logout = useCallback(() => {
-    console.log("🚪 Fazendo logout...");
-    clearAuthData();
-
-    // ✅ Redirecionamento apenas para página de login
-    setTimeout(() => {
-      router.replace("/auth");
-    }, 100);
-  }, [clearAuthData, router]);
-
-  // Resto do código permanece igual...
-  const clearAuthData = useCallback(() => {
-    console.log("🧹 Limpando dados de autenticação");
-    localStorage.removeItem("authToken");
-    localStorage.removeItem("user");
-    setUser(null);
-    setToken(null);
-  }, []);
-
+  // Register function
   const register = useCallback(
-    async (userData: {
-      username: string;
-      email: string;
-      password: string;
-      role: string;
-    }): Promise<boolean> => {
-      if (isLoading) return false;
-
-      setIsLoading(true);
+    async (userData: RegisterData) => {
       try {
-        await authAPI.register(userData);
-        setIsLoading(false);
-        return true;
+        updateState({ isLoading: true, error: null });
+        console.log("📝 Tentando registrar usuário...");
+
+        const response = await authAPI.register(userData);
+
+        updateState({
+          user: response.user,
+          isLoading: false,
+          isAuthenticated: true,
+          error: null,
+        });
+
+        console.log(
+          "✅ Registro realizado com sucesso:",
+          response.user.username
+        );
       } catch (error) {
         console.error("❌ Erro no registro:", error);
-        setIsLoading(false);
-        return false;
+
+        let errorMessage = "Erro ao criar conta";
+
+        if (error instanceof NetworkError) {
+          errorMessage = "Erro de conexão. Verifique sua internet.";
+        } else if (error instanceof Error) {
+          if (error.message.includes("email")) {
+            errorMessage = "Este email já está em uso";
+          } else if (error.message.includes("username")) {
+            errorMessage = "Este nome de usuário já está em uso";
+          } else {
+            errorMessage = error.message;
+          }
+        }
+
+        updateState({
+          user: null,
+          isLoading: false,
+          isAuthenticated: false,
+          error: errorMessage,
+        });
+
+        throw error;
       }
     },
-    [isLoading]
+    [updateState]
   );
 
-  const refreshToken = useCallback(async (): Promise<boolean> => {
+  // Logout function
+  const logout = useCallback(async () => {
     try {
-      const authData = await authAPI.refreshToken();
-      localStorage.setItem("authToken", authData.access_token);
-      setToken(authData.access_token);
-      console.log("✅ Token atualizado com sucesso");
-      return true;
+      updateState({ isLoading: true, error: null });
+      console.log("🚪 Fazendo logout...");
+
+      await authAPI.logout();
+
+      updateState({
+        user: null,
+        isLoading: false,
+        isAuthenticated: false,
+        error: null,
+      });
+
+      console.log("✅ Logout realizado com sucesso");
     } catch (error) {
-      console.error("❌ Erro ao atualizar token:", error);
-      logout();
-      return false;
+      console.error("❌ Erro no logout:", error);
+
+      // Even if logout fails, clear local state
+      updateState({
+        user: null,
+        isLoading: false,
+        isAuthenticated: false,
+        error: null,
+      });
+
+      // Don't throw error for logout failures
     }
-  }, [logout]);
+  }, [updateState]);
+
+  // Validate token function
+  const validateToken = useCallback(async () => {
+    try {
+      console.log("🔍 Validando token...");
+
+      const token = localStorage.getItem("authToken");
+      if (!token) {
+        throw new AuthenticationError("Token não encontrado");
+      }
+
+      const userData = await authAPI.getMe();
+
+      updateState({
+        user: userData,
+        isAuthenticated: true,
+        error: null,
+      });
+
+      console.log("✅ Token válido");
+    } catch (error) {
+      console.error("❌ Token inválido:", error);
+
+      // Remove invalid token
+      localStorage.removeItem("authToken");
+
+      updateState({
+        user: null,
+        isAuthenticated: false,
+        error: "Sessão expirada. Faça login novamente.",
+      });
+
+      throw error;
+    }
+  }, [updateState]);
+
+  // Refresh user data
+  const refreshUser = useCallback(async () => {
+    try {
+      if (!state.isAuthenticated) {
+        return;
+      }
+
+      console.log("🔄 Atualizando dados do usuário...");
+      const userData = await authAPI.getMe();
+
+      updateState({
+        user: userData,
+        error: null,
+      });
+
+      console.log("✅ Dados do usuário atualizados");
+    } catch (error) {
+      console.error("❌ Erro ao atualizar dados do usuário:", error);
+
+      if (error instanceof AuthenticationError) {
+        // Token became invalid, logout user
+        await logout();
+      }
+    }
+  }, [state.isAuthenticated, updateState, logout]);
+
+  // Auto-refresh user data every 5 minutes
+  useEffect(() => {
+    if (!state.isAuthenticated) return;
+
+    const interval = setInterval(() => {
+      refreshUser();
+    }, 5 * 60 * 1000); // 5 minutes
+
+    return () => clearInterval(interval);
+  }, [state.isAuthenticated, refreshUser]);
+
+  // Context value
+  const value: AuthContextType = {
+    ...state,
+    login,
+    register,
+    logout,
+    validateToken,
+    clearError,
+    refreshUser,
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+// Hook to use auth context
+export function useAuth(): AuthContextType {
+  const context = useContext(AuthContext);
+
+  if (context === undefined) {
+    throw new Error("useAuth must be used within an AuthProvider");
+  }
+
+  return context;
+}
+
+// Hook for components that only need auth state (no actions)
+export function useAuthState(): AuthState {
+  const { user, isLoading, error, isAuthenticated } = useAuth();
+  return { user, isLoading, error, isAuthenticated };
+}
+
+// Hook to check if user has specific permissions
+export function usePermissions() {
+  const { user } = useAuth();
 
   return {
-    user,
-    token,
-    isLoading,
-    isAuthenticated,
-    login,
-    logout,
-    register,
-    refreshToken,
+    canCreateCampaign: Boolean(user?.is_active),
+    canEditCampaign: (campaignOwnerId: string) => user?.id === campaignOwnerId,
+    canDeleteCampaign: (campaignOwnerId: string) =>
+      user?.id === campaignOwnerId,
+    canEditCharacter: (characterOwnerId: string) =>
+      user?.id === characterOwnerId,
+    isAdmin: false, // Implement admin role if needed
   };
 }
 
+// Export everything
 export default useAuth;
+export type { AuthState, AuthContextType };
