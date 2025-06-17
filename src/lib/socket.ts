@@ -620,11 +620,3 @@ export const useLockSocket = (campaignId: string, userId: string) => {
     whoLocked,
   };
 };
-
-// Export all hooks
-export {
-  useWebSocket as default,
-  useCharacterSocket,
-  useCombatSocket,
-  useLockSocket,
-};

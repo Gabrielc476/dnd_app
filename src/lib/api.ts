@@ -187,9 +187,9 @@ export const authAPI = {
     try {
       console.log("🔐 Tentando fazer login...");
 
-      // Create form data as expected by FastAPI OAuth2
+      // ✅ CORREÇÃO: Create form data as expected by FastAPI OAuth2
       const formData = new URLSearchParams();
-      formData.append("username", credentials.email); // FastAPI OAuth2 uses 'username' field
+      formData.append("username", credentials.email); // ✅ FastAPI OAuth2 uses 'username' field but we send email
       formData.append("password", credentials.password);
 
       const response = await apiRequest<AuthResponse>("/api/auth/login", {
@@ -240,7 +240,6 @@ export const authAPI = {
 
   /**
    * Get current user data - IMPLEMENTAÇÃO COMPLETA
-   * Corrige o problema identificado na análise onde esta função estava ausente
    */
   async getMe(): Promise<User> {
     try {
@@ -255,17 +254,23 @@ export const authAPI = {
         method: "GET",
       });
 
-      console.log("✅ Dados do usuário obtidos com sucesso");
+      console.log("✅ Dados do usuário obtidos:", response.username);
       return response;
     } catch (error) {
       console.error("❌ Erro ao buscar dados do usuário:", error);
-
-      // If authentication failed, remove invalid token
-      if (error instanceof AuthenticationError) {
-        removeAuthToken();
-      }
-
       throw error;
+    }
+  },
+
+  /**
+   * Validate token
+   */
+  async validateToken(): Promise<boolean> {
+    try {
+      await this.getMe();
+      return true;
+    } catch (error) {
+      return false;
     }
   },
 
@@ -276,49 +281,22 @@ export const authAPI = {
     try {
       console.log("🚪 Fazendo logout...");
 
-      // Call logout endpoint if it exists
-      try {
-        await apiRequest("/api/auth/logout", {
-          method: "POST",
-        });
-      } catch (error) {
-        // Ignore server errors on logout
-        console.warn("Logout endpoint error (ignoring):", error);
-      }
+      // Call logout endpoint if needed
+      await apiRequest("/api/auth/logout", {
+        method: "POST",
+      });
 
       // Always remove token locally
       removeAuthToken();
       console.log("✅ Logout realizado com sucesso");
     } catch (error) {
+      console.error("❌ Erro no logout:", error);
       // Always remove token even if server call fails
       removeAuthToken();
-      console.error("❌ Erro no logout:", error);
+      throw error;
     }
-  },
-
-  /**
-   * Validate current token
-   */
-  async validateToken(): Promise<boolean> {
-    try {
-      await this.getMe();
-      return true;
-    } catch (error) {
-      if (error instanceof AuthenticationError) {
-        removeAuthToken();
-      }
-      return false;
-    }
-  },
-
-  /**
-   * Refresh user data (alias for getMe for backward compatibility)
-   */
-  async refreshUser(): Promise<User> {
-    return this.getMe();
   },
 };
-
 // ===== CHARACTERS API =====
 export const charactersAPI = {
   /**
@@ -615,6 +593,3 @@ export default {
   npcs: npcsAPI,
   combat: combatAPI,
 };
-
-// Re-export error classes for easy use
-export { ApiError, AuthenticationError, NetworkError, ValidationError };

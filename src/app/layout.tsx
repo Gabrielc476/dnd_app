@@ -1,3 +1,5 @@
+// src/app/layout.tsx - FIXED VERSION
+
 "use client";
 
 import React, { useEffect, useState } from "react";
@@ -21,21 +23,14 @@ import {
   CheckCircle,
 } from "lucide-react";
 
-// ===== IMPORTS CORRIGIDOS =====
 import "./globals.css";
 
-// Hooks and stores
-import { useAuth } from "@/hooks/useAuth";
+// ===== IMPORTS =====
+import { AuthProvider, useAuth } from "@/hooks/useAuth"; // ✅ Import AuthProvider
 import { useGameStore } from "@/stores/gameStore";
 import { StoreProvider, initializeStores } from "@/stores";
-
-// CORREÇÃO: Error Boundary
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-
-// CORREÇÃO: Sonner em vez de toaster antigo
 import { Toaster } from "sonner";
-
-// CORREÇÃO: Theme provider corrigido
 import { ThemeProvider } from "@/components/theme-provider";
 
 // UI Components
@@ -110,118 +105,131 @@ const navigationItems = [
   },
 ];
 
-// ✅ AUTHGUARD CORRIGIDO E COMPLETO
+// ✅ AUTHGUARD COMPONENT - CORRIGIDO PARA ESTRUTURA REAL
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { user, isLoading, isAuthenticated } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
 
-  // Páginas públicas que não precisam de autenticação
+  // ✅ Páginas públicas reais (landing + auth unificado)
   const publicPages = [
-    "/",
-    "/auth/login",
-    "/auth/register",
-    "/auth/forgot-password",
+    "/", // Landing page
+    "/auth", // Auth unificada (login + register)
   ];
   const isPublicPage = publicPages.includes(pathname);
 
-  // Mostrar loading enquanto carrega
+  // ✅ Handle redirects in useEffect to avoid render-time state updates
+  useEffect(() => {
+    if (!isLoading) {
+      // Se não está autenticado e não está em página pública → ir para /auth
+      if (!isAuthenticated && !isPublicPage) {
+        router.push("/auth");
+      }
+      // Se está autenticado e está em página pública → ir para dashboard
+      else if (isAuthenticated && isPublicPage) {
+        router.push("/dashboard");
+      }
+    }
+  }, [isLoading, isAuthenticated, isPublicPage, router, pathname]);
+
+  // Show loading while checking auth
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="flex flex-col items-center gap-4">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-          <span className="text-muted-foreground">Loading...</span>
+          <span className="text-muted-foreground">Carregando...</span>
         </div>
       </div>
     );
   }
 
-  // Se não está autenticado e não é página pública, redirecionar
+  // Se não está autenticado e não é página pública → mostrar loading enquanto redireciona
   if (!isAuthenticated && !isPublicPage) {
-    router.push("/auth/login");
-    return null;
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <span className="text-muted-foreground">
+            Redirecionando para login...
+          </span>
+        </div>
+      </div>
+    );
   }
 
-  // Se está autenticado e está em página pública, redirecionar para dashboard
-  if (isAuthenticated && isPublicPage && pathname !== "/") {
-    router.push("/dashboard");
-    return null;
+  // Se está autenticado e em página pública → mostrar loading enquanto redireciona
+  if (isAuthenticated && isPublicPage) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <span className="text-muted-foreground">
+            Redirecionando para dashboard...
+          </span>
+        </div>
+      </div>
+    );
   }
 
   return <>{children}</>;
 }
 
-// ✅ MAIN LAYOUT CORRIGIDO E COMPLETO
+// ✅ MAIN LAYOUT COMPONENT
 function MainLayout({ children }: { children: React.ReactNode }) {
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const { user, logout } = useAuth();
-  const { currentCampaign, isConnected } = useGameStore();
   const pathname = usePathname();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { isConnected, error: connectionError } = useGameStore();
 
-  // Não mostrar sidebar em páginas de auth e landing
-  const authPages = [
-    "/auth/login",
-    "/auth/register",
-    "/auth/forgot-password",
-    "/",
-  ];
-  const isAuthPage = authPages.includes(pathname);
+  // ✅ Não mostrar sidebar apenas nas páginas públicas reais
+  const isPublicPage = pathname === "/" || pathname === "/auth";
 
-  if (isAuthPage) {
+  if (isPublicPage) {
     return <>{children}</>;
   }
 
-  const handleLogout = async () => {
-    try {
-      await logout();
-    } catch (error) {
-      console.error("Erro ao fazer logout:", error);
-    }
-  };
-
   return (
     <div className="flex h-screen bg-background">
-      {/* Sidebar Desktop */}
-      <div className="hidden md:flex md:w-64 md:flex-col">
-        <div className="flex flex-col flex-grow border-r bg-card">
-          <div className="flex items-center h-16 px-4 border-b">
+      {/* Sidebar */}
+      <aside className="hidden lg:flex lg:w-64 lg:flex-col">
+        <div className="flex flex-col flex-1 min-h-0 bg-card border-r">
+          {/* Sidebar Header */}
+          <div className="flex items-center justify-between h-16 px-6 border-b">
             <h1 className="text-xl font-bold">D&D VTT</h1>
           </div>
 
-          <ScrollArea className="flex-1 px-3">
-            <div className="space-y-1 py-4">
-              {navigationItems.map((item) => (
-                <Button
-                  key={item.href}
-                  variant={pathname === item.href ? "default" : "ghost"}
-                  className="w-full justify-start"
-                  onClick={() => (window.location.href = item.href)}
-                >
-                  <item.icon className="mr-2 h-4 w-4" />
+          {/* Navigation */}
+          <nav className="flex-1 px-4 py-6 space-y-2">
+            {navigationItems.map((item) => (
+              <Button
+                key={item.href}
+                variant={pathname === item.href ? "default" : "ghost"}
+                className="w-full justify-start"
+                asChild
+              >
+                <a href={item.href}>
+                  <item.icon className="mr-3 h-4 w-4" />
                   {item.title}
-                </Button>
-              ))}
-            </div>
-          </ScrollArea>
+                </a>
+              </Button>
+            ))}
+          </nav>
 
-          {/* User section */}
-          <div className="border-t p-4">
+          {/* User info */}
+          <div className="p-4 border-t">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="w-full justify-start">
-                  <Avatar className="mr-2 h-6 w-6">
-                    <AvatarImage
-                      src={`https://api.dicebear.com/7.x/initials/svg?seed=${user?.username}`}
-                    />
+                  <Avatar className="mr-3 h-8 w-8">
                     <AvatarFallback>
-                      {user?.username?.charAt(0).toUpperCase() || "U"}
+                      {user?.username?.[0]?.toUpperCase() || "U"}
                     </AvatarFallback>
                   </Avatar>
                   <span className="truncate">{user?.username || "User"}</span>
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuContent>
                 <DropdownMenuItem>
                   <User className="mr-2 h-4 w-4" />
                   Profile
@@ -231,7 +239,7 @@ function MainLayout({ children }: { children: React.ReactNode }) {
                   Settings
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleLogout}>
+                <DropdownMenuItem onClick={logout}>
                   <LogOut className="mr-2 h-4 w-4" />
                   Logout
                 </DropdownMenuItem>
@@ -239,111 +247,86 @@ function MainLayout({ children }: { children: React.ReactNode }) {
             </DropdownMenu>
           </div>
         </div>
-      </div>
+      </aside>
 
-      {/* Mobile Sidebar */}
-      <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-        <SheetTrigger asChild>
-          <Button
-            variant="outline"
-            size="icon"
-            className="md:hidden fixed top-4 left-4 z-50"
-          >
-            <Menu className="h-4 w-4" />
-          </Button>
-        </SheetTrigger>
+      {/* Mobile sidebar */}
+      <Sheet open={isSidebarOpen} onOpenChange={setIsSidebarOpen}>
         <SheetContent side="left" className="w-64 p-0">
-          <SheetHeader className="border-b px-4 py-3">
-            <SheetTitle>D&D VTT</SheetTitle>
-          </SheetHeader>
-          <ScrollArea className="flex-1 px-3">
-            <div className="space-y-1 py-4">
+          <div className="flex flex-col h-full">
+            <SheetHeader className="p-6 border-b">
+              <SheetTitle>D&D VTT</SheetTitle>
+              <SheetDescription>Virtual Tabletop</SheetDescription>
+            </SheetHeader>
+            <nav className="flex-1 px-4 py-6 space-y-2">
               {navigationItems.map((item) => (
                 <Button
                   key={item.href}
                   variant={pathname === item.href ? "default" : "ghost"}
                   className="w-full justify-start"
-                  onClick={() => {
-                    window.location.href = item.href;
-                    setSidebarOpen(false);
-                  }}
+                  asChild
+                  onClick={() => setIsSidebarOpen(false)}
                 >
-                  <item.icon className="mr-2 h-4 w-4" />
-                  {item.title}
+                  <a href={item.href}>
+                    <item.icon className="mr-3 h-4 w-4" />
+                    {item.title}
+                  </a>
                 </Button>
               ))}
-            </div>
-          </ScrollArea>
+            </nav>
+          </div>
         </SheetContent>
       </Sheet>
 
-      {/* Main Content */}
+      {/* Main content */}
       <div className="flex flex-col flex-1 overflow-hidden">
-        {/* Top Bar */}
-        <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-          <div className="flex h-16 items-center px-6">
-            <div className="ml-auto flex items-center space-x-4">
-              {/* Connection Status */}
-              <div className="flex items-center space-x-2">
-                {isConnected ? (
-                  <Badge variant="default" className="gap-1">
-                    <Wifi className="h-3 w-3" />
-                    Connected
-                  </Badge>
-                ) : (
-                  <Badge variant="destructive" className="gap-1">
-                    <WifiOff className="h-3 w-3" />
-                    Disconnected
-                  </Badge>
-                )}
-              </div>
+        {/* Header */}
+        <header className="flex items-center justify-between h-16 px-6 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className="flex items-center gap-4">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="lg:hidden"
+              onClick={() => setIsSidebarOpen(true)}
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+            <h2 className="text-lg font-semibold capitalize">
+              {pathname.slice(1) || "Dashboard"}
+            </h2>
+          </div>
 
-              {/* Current Campaign */}
-              {currentCampaign && (
-                <div className="flex items-center space-x-2">
-                  <Badge variant="outline" className="gap-1">
-                    <CheckCircle className="h-3 w-3" />
-                    {currentCampaign.name}
-                  </Badge>
+          <div className="flex items-center gap-4">
+            {/* Connection status */}
+            <div className="flex items-center gap-2">
+              {isConnected ? (
+                <div className="flex items-center gap-2 text-green-600">
+                  <Wifi className="h-4 w-4" />
+                  <span className="text-sm">Online</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-red-600">
+                  <WifiOff className="h-4 w-4" />
+                  <span className="text-sm">Offline</span>
                 </div>
               )}
-
-              {/* Notifications */}
-              <Button variant="ghost" size="icon">
-                <Bell className="h-4 w-4" />
-              </Button>
-
-              {/* User Avatar */}
-              <Avatar className="h-8 w-8">
-                <AvatarImage
-                  src={`https://api.dicebear.com/7.x/initials/svg?seed=${user?.username}`}
-                />
-                <AvatarFallback>
-                  {user?.username?.charAt(0).toUpperCase() || "U"}
-                </AvatarFallback>
-              </Avatar>
             </div>
+
+            <Button variant="ghost" size="sm">
+              <Bell className="h-5 w-5" />
+            </Button>
           </div>
         </header>
 
-        {/* Campaign Selection Alert */}
-        {!currentCampaign && (
-          <Alert className="m-6 mb-0">
+        {/* Connection error alert */}
+        {connectionError && (
+          <Alert className="m-4 border-destructive">
             <AlertDescription>
-              Please{" "}
-              <Button
-                variant="link"
-                className="p-0 h-auto"
-                onClick={() => (window.location.href = "/campaign")}
-              >
-                select or create a campaign
-              </Button>{" "}
-              to access all features.
+              Connection error: {connectionError}
             </AlertDescription>
           </Alert>
         )}
 
-        {/* Main Content Area */}
+        {/* Main content area */}
         <main className="flex-1 overflow-x-hidden overflow-y-auto bg-background">
           <div className="container mx-auto px-6 py-8">{children}</div>
         </main>
@@ -352,7 +335,7 @@ function MainLayout({ children }: { children: React.ReactNode }) {
   );
 }
 
-// ✅ ROOT LAYOUT CORRIGIDO E COMPLETO
+// ✅ ROOT LAYOUT - PROPERLY STRUCTURED
 export default function RootLayout({
   children,
 }: {
@@ -392,10 +375,12 @@ export default function RootLayout({
             disableTransitionOnChange
           >
             <StoreProvider>
-              <AuthGuard>
-                <MainLayout>{children}</MainLayout>
-              </AuthGuard>
-              {/* CORREÇÃO: Sonner Toaster */}
+              {/* ✅ CORRECT ORDER: AuthProvider wraps AuthGuard */}
+              <AuthProvider>
+                <AuthGuard>
+                  <MainLayout>{children}</MainLayout>
+                </AuthGuard>
+              </AuthProvider>
               <Toaster position="top-right" richColors />
             </StoreProvider>
           </ThemeProvider>

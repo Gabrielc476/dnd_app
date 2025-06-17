@@ -1,11 +1,12 @@
-// src/app/auth/page.tsx - VERSÃO CORRIGIDA
+// src/app/auth/page.tsx - CORRIGIDO
+
 "use client";
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Dice6, Eye, EyeOff, UserPlus, LogIn, Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import { useToast } from "@/hooks/use-toast";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,14 +30,13 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function AuthPage() {
   const router = useRouter();
-  const { login, register, isLoading, isAuthenticated } = useAuth();
-  const { toast } = useToast();
+  const { login, register, isLoading, isAuthenticated, error } = useAuth();
 
-  // ✅ Estados do formulário
+  // Estados do formulário
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loginForm, setLoginForm] = useState({
-    username: "",
+    email: "", // ✅ Usando email como esperado pelo backend
     password: "",
   });
   const [registerForm, setRegisterForm] = useState({
@@ -46,7 +46,7 @@ export default function AuthPage() {
     role: "player" as "player" | "dm",
   });
 
-  // ✅ Redirecionamento automático se já autenticado
+  // Redirecionamento automático se já autenticado
   useEffect(() => {
     if (isAuthenticated && !isLoading) {
       console.log("✅ Usuário já autenticado, redirecionando...");
@@ -54,7 +54,7 @@ export default function AuthPage() {
     }
   }, [isAuthenticated, isLoading, router]);
 
-  // ✅ LOGIN MELHORADO
+  // ✅ LOGIN CORRIGIDO - Agora usa objeto LoginCredentials
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -62,59 +62,36 @@ export default function AuthPage() {
       return;
     }
 
-    console.log("🔐 Tentativa de login para:", loginForm.username);
-
-    // ✅ Validação básica
-    if (!loginForm.username.trim() || !loginForm.password.trim()) {
-      toast({
-        title: "Campos obrigatórios",
-        description: "Preencha usuário e senha",
-        variant: "destructive",
-      });
+    // Validação básica
+    if (!loginForm.email.trim() || !loginForm.password.trim()) {
+      toast.error("Preencha email e senha");
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      const success = await login(
-        loginForm.username.trim(),
-        loginForm.password
-      );
+      // ✅ FORMATO CORRETO: Passar objeto LoginCredentials
+      const success = await login({
+        email: loginForm.email.trim(),
+        password: loginForm.password,
+      });
 
       if (success) {
-        toast({
-          title: "Login realizado!",
-          description: "Redirecionando para o dashboard...",
-        });
-
-        // ✅ Aguardar um pouco antes de redirecionar
-        setTimeout(() => {
-          router.replace("/dashboard");
-        }, 1000);
+        toast.success("Login realizado com sucesso!");
+        // O redirecionamento será feito automaticamente pelo useEffect acima
       } else {
-        toast({
-          title: "Erro no login",
-          description: "Usuário ou senha incorretos",
-          variant: "destructive",
-        });
-
-        // ✅ Limpar apenas a senha em caso de erro
-        setLoginForm((prev) => ({ ...prev, password: "" }));
+        toast.error("Erro ao fazer login");
       }
     } catch (error) {
       console.error("❌ Erro no login:", error);
-      toast({
-        title: "Erro no login",
-        description: "Ocorreu um erro inesperado. Tente novamente.",
-        variant: "destructive",
-      });
+      toast.error("Erro ao fazer login. Tente novamente.");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // ✅ REGISTER MELHORADO
+  // ✅ REGISTRO CORRIGIDO
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -122,37 +99,18 @@ export default function AuthPage() {
       return;
     }
 
-    // ✅ Validação
+    // Validação básica
     if (
       !registerForm.username.trim() ||
       !registerForm.email.trim() ||
       !registerForm.password.trim()
     ) {
-      toast({
-        title: "Campos obrigatórios",
-        description: "Preencha todos os campos",
-        variant: "destructive",
-      });
+      toast.error("Preencha todos os campos");
       return;
     }
 
     if (registerForm.password.length < 6) {
-      toast({
-        title: "Senha muito curta",
-        description: "A senha deve ter pelo menos 6 caracteres",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    // ✅ Validação básica de email
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(registerForm.email)) {
-      toast({
-        title: "Email inválido",
-        description: "Digite um email válido",
-        variant: "destructive",
-      });
+      toast.error("A senha deve ter pelo menos 6 caracteres");
       return;
     }
 
@@ -167,44 +125,20 @@ export default function AuthPage() {
       });
 
       if (success) {
-        toast({
-          title: "Conta criada!",
-          description: "Agora você pode fazer login",
-        });
-
-        // ✅ Mudar para aba de login e preencher o usuário
-        setLoginForm({
-          username: registerForm.username,
-          password: "",
-        });
-
-        // ✅ Reset do formulário de registro
-        setRegisterForm({
-          username: "",
-          email: "",
-          password: "",
-          role: "player",
-        });
+        toast.success("Conta criada com sucesso!");
+        // O redirecionamento será feito automaticamente pelo useEffect acima
       } else {
-        toast({
-          title: "Erro no cadastro",
-          description: "Não foi possível criar a conta. Tente novamente.",
-          variant: "destructive",
-        });
+        toast.error("Erro ao criar conta");
       }
     } catch (error) {
       console.error("❌ Erro no registro:", error);
-      toast({
-        title: "Erro no cadastro",
-        description: "Ocorreu um erro inesperado. Tente novamente.",
-        variant: "destructive",
-      });
+      toast.error("Erro ao criar conta. Tente novamente.");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // ✅ Se já estiver autenticado, mostrar loading
+  // Se já estiver autenticado, mostrar loading
   if (isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
@@ -222,85 +156,73 @@ export default function AuthPage() {
     );
   }
 
-  // ✅ Mostrar loading durante inicialização
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
-        <Card className="w-full max-w-md text-center">
-          <CardContent className="pt-6">
-            <div className="flex flex-col items-center gap-4">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              <p className="text-muted-foreground">Carregando...</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  const isFormDisabled = isSubmitting || isLoading;
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
-            <Dice6 className="h-12 w-12 text-primary" />
+            <div className="p-3 bg-primary/10 rounded-full">
+              <Dice6 className="h-8 w-8 text-primary" />
+            </div>
           </div>
-          <CardTitle className="text-2xl">D&D VTT</CardTitle>
+          <CardTitle className="text-2xl font-bold">
+            D&D Virtual Tabletop
+          </CardTitle>
           <CardDescription>
-            Virtual Tabletop para suas aventuras
+            Entre ou crie sua conta para começar suas aventuras
           </CardDescription>
         </CardHeader>
 
         <CardContent>
+          {/* Exibir erro se houver */}
+          {error && (
+            <Alert className="mb-4 border-destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
           <Tabs defaultValue="login" className="w-full">
             <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="login" disabled={isFormDisabled}>
+              <TabsTrigger value="login">
                 <LogIn className="h-4 w-4 mr-2" />
                 Entrar
               </TabsTrigger>
-              <TabsTrigger value="register" disabled={isFormDisabled}>
+              <TabsTrigger value="register">
                 <UserPlus className="h-4 w-4 mr-2" />
-                Cadastrar
+                Criar Conta
               </TabsTrigger>
             </TabsList>
 
+            {/* LOGIN TAB */}
             <TabsContent value="login" className="space-y-4">
               <form onSubmit={handleLogin} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="login-username">Usuário</Label>
+                  <Label htmlFor="email">Email</Label>
                   <Input
-                    id="login-username"
-                    type="text"
-                    value={loginForm.username}
+                    id="email"
+                    type="email"
+                    placeholder="seu@email.com"
+                    value={loginForm.email}
                     onChange={(e) =>
-                      setLoginForm((prev) => ({
-                        ...prev,
-                        username: e.target.value,
-                      }))
+                      setLoginForm({ ...loginForm, email: e.target.value })
                     }
-                    placeholder="Seu nome de usuário"
-                    disabled={isFormDisabled}
+                    disabled={isSubmitting || isLoading}
                     required
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="login-password">Senha</Label>
+                  <Label htmlFor="password">Senha</Label>
                   <div className="relative">
                     <Input
-                      id="login-password"
+                      id="password"
                       type={showPassword ? "text" : "password"}
+                      placeholder="Sua senha"
                       value={loginForm.password}
                       onChange={(e) =>
-                        setLoginForm((prev) => ({
-                          ...prev,
-                          password: e.target.value,
-                        }))
+                        setLoginForm({ ...loginForm, password: e.target.value })
                       }
-                      placeholder="Sua senha"
-                      disabled={isFormDisabled}
+                      disabled={isSubmitting || isLoading}
                       required
                     />
                     <Button
@@ -309,7 +231,7 @@ export default function AuthPage() {
                       size="sm"
                       className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
                       onClick={() => setShowPassword(!showPassword)}
-                      disabled={isFormDisabled}
+                      disabled={isSubmitting || isLoading}
                     >
                       {showPassword ? (
                         <EyeOff className="h-4 w-4" />
@@ -323,73 +245,77 @@ export default function AuthPage() {
                 <Button
                   type="submit"
                   className="w-full"
-                  disabled={isFormDisabled}
+                  disabled={isSubmitting || isLoading}
                 >
-                  {isSubmitting ? (
+                  {isSubmitting || isLoading ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Entrando...
                     </>
                   ) : (
-                    "Entrar"
+                    <>
+                      <LogIn className="mr-2 h-4 w-4" />
+                      Entrar
+                    </>
                   )}
                 </Button>
               </form>
             </TabsContent>
 
+            {/* REGISTER TAB */}
             <TabsContent value="register" className="space-y-4">
               <form onSubmit={handleRegister} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="register-username">Usuário</Label>
+                  <Label htmlFor="reg-username">Nome de Usuário</Label>
                   <Input
-                    id="register-username"
+                    id="reg-username"
                     type="text"
+                    placeholder="SeuNomeAqui"
                     value={registerForm.username}
                     onChange={(e) =>
-                      setRegisterForm((prev) => ({
-                        ...prev,
+                      setRegisterForm({
+                        ...registerForm,
                         username: e.target.value,
-                      }))
+                      })
                     }
-                    placeholder="Nome de usuário"
-                    disabled={isFormDisabled}
+                    disabled={isSubmitting || isLoading}
                     required
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="register-email">Email</Label>
+                  <Label htmlFor="reg-email">Email</Label>
                   <Input
-                    id="register-email"
+                    id="reg-email"
                     type="email"
+                    placeholder="seu@email.com"
                     value={registerForm.email}
                     onChange={(e) =>
-                      setRegisterForm((prev) => ({
-                        ...prev,
+                      setRegisterForm({
+                        ...registerForm,
                         email: e.target.value,
-                      }))
+                      })
                     }
-                    placeholder="seu@email.com"
-                    disabled={isFormDisabled}
+                    disabled={isSubmitting || isLoading}
                     required
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="register-password">Senha</Label>
+                  <Label htmlFor="reg-password">Senha</Label>
                   <div className="relative">
                     <Input
-                      id="register-password"
+                      id="reg-password"
                       type={showPassword ? "text" : "password"}
+                      placeholder="Mínimo 6 caracteres"
                       value={registerForm.password}
                       onChange={(e) =>
-                        setRegisterForm((prev) => ({
-                          ...prev,
+                        setRegisterForm({
+                          ...registerForm,
                           password: e.target.value,
-                        }))
+                        })
                       }
-                      placeholder="Mínimo 6 caracteres"
-                      disabled={isFormDisabled}
+                      disabled={isSubmitting || isLoading}
                       required
                       minLength={6}
                     />
@@ -399,7 +325,7 @@ export default function AuthPage() {
                       size="sm"
                       className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
                       onClick={() => setShowPassword(!showPassword)}
-                      disabled={isFormDisabled}
+                      disabled={isSubmitting || isLoading}
                     >
                       {showPassword ? (
                         <EyeOff className="h-4 w-4" />
@@ -411,16 +337,16 @@ export default function AuthPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="register-role">Função</Label>
+                  <Label htmlFor="role">Tipo de Conta</Label>
                   <Select
                     value={registerForm.role}
                     onValueChange={(value: "player" | "dm") =>
-                      setRegisterForm((prev) => ({ ...prev, role: value }))
+                      setRegisterForm({ ...registerForm, role: value })
                     }
-                    disabled={isFormDisabled}
+                    disabled={isSubmitting || isLoading}
                   >
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue placeholder="Selecione o tipo" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="player">Jogador</SelectItem>
@@ -432,28 +358,23 @@ export default function AuthPage() {
                 <Button
                   type="submit"
                   className="w-full"
-                  disabled={isFormDisabled}
+                  disabled={isSubmitting || isLoading}
                 >
-                  {isSubmitting ? (
+                  {isSubmitting || isLoading ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Criando conta...
                     </>
                   ) : (
-                    "Criar conta"
+                    <>
+                      <UserPlus className="mr-2 h-4 w-4" />
+                      Criar Conta
+                    </>
                   )}
                 </Button>
               </form>
             </TabsContent>
           </Tabs>
-
-          {/* ✅ Dicas de uso */}
-          <div className="mt-6 p-4 bg-muted rounded-lg">
-            <p className="text-sm text-muted-foreground text-center">
-              <strong>Dica:</strong> Crie uma conta como "Mestre (DM)" para
-              criar campanhas, ou como "Jogador" para participar de aventuras.
-            </p>
-          </div>
         </CardContent>
       </Card>
     </div>
