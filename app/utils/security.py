@@ -1,17 +1,19 @@
 # app/utils/security.py
 """
-Utilidades de segurança - CORRIGIDO
+Utilidades de segurança - CORRIGIDO PARA PyJWT
 Problemas resolvidos:
 1. ✅ Removidos logs de debug que expunham SECRET_KEY
 2. ✅ Implementado logging seguro usando logger
 3. ✅ Melhorado tratamento de erros
 4. ✅ Adicionada validação de token mais robusta
+5. ✅ Migrado de python-jose para PyJWT (mais estável)
 """
 
 import logging
 from datetime import datetime, timedelta
 from typing import Union, Optional, Dict, Any
-from jose import JWTError, jwt
+import jwt  # PyJWT em vez de python-jose
+from jwt.exceptions import InvalidTokenError, ExpiredSignatureError, DecodeError
 from passlib.context import CryptContext
 from fastapi import HTTPException, status
 
@@ -133,20 +135,17 @@ def decode_access_token(token: str) -> Dict[str, Any]:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # Verificar expiração manualmente para melhor controle
-        exp = payload.get("exp")
-        if exp and datetime.fromtimestamp(exp) < datetime.utcnow():
-            logger.warning("Token expirado")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token expirado",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
         logger.debug("Token validado com sucesso")
         return payload
 
-    except JWTError as e:
+    except ExpiredSignatureError:
+        logger.warning("Token expirado")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token expirado",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except (InvalidTokenError, DecodeError) as e:
         logger.warning(f"Erro de JWT: {type(e).__name__}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -219,3 +218,55 @@ def hash_api_key(api_key: str) -> str:
         Hash da chave de API
     """
     return get_password_hash(api_key)
+
+
+def verify_api_key(plain_api_key: str, hashed_api_key: str) -> bool:
+    """
+    Verifica uma chave de API.
+
+    Args:
+        plain_api_key: Chave de API em texto plano
+        hashed_api_key: Hash da chave de API
+
+    Returns:
+        True se a chave estiver correta, False caso contrário
+    """
+    return verify_password(plain_api_key, hashed_api_key)
+
+
+def generate_secure_token(length: int = 32) -> str:
+    """
+    Gera um token seguro aleatório.
+
+    Args:
+        length: Comprimento do token
+
+    Returns:
+        Token seguro
+    """
+    import secrets
+    return secrets.token_urlsafe(length)
+
+
+def is_token_expired(token: str) -> bool:
+    """
+    Verifica se um token está expirado sem lançar exceção.
+
+    Args:
+        token: Token JWT para verificar
+
+    Returns:
+        True se expirado, False se válido
+    """
+    try:
+        jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM]
+        )
+        return False
+    except ExpiredSignatureError:
+        return True
+    except Exception:
+        # Se houve qualquer outro erro, considerar como expirado
+        return True

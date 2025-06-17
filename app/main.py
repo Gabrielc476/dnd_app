@@ -8,6 +8,7 @@ Problemas resolvidos:
 4. ✅ Inicialização sem dependências opcionais
 5. ✅ Logs informativos de startup
 6. ✅ Fallback para configuração simples
+7. ✅ Correção do problema de validators duplicados
 """
 
 import logging
@@ -28,37 +29,44 @@ print("🚀 Iniciando D&D VTT Backend...")
 print(f"📁 Diretório de trabalho: {os.getcwd()}")
 print(f"🐍 Python: {sys.version}")
 
-# Importar configurações com tratamento de erro melhorado
+# NOVA ESTRATÉGIA: Tentar configuração simples PRIMEIRO para evitar problemas Pydantic
 settings = None
 config_source = None
 
+# Tentativa 1: Configuração simples (mais confiável)
 try:
-    # Tentar carregar configuração com Pydantic primeiro
-    from app.core.config import settings
+    from app.config import settings
 
-    config_source = "core.config (Pydantic)"
-    logger.info("✅ Configurações Pydantic carregadas com sucesso")
+    config_source = "config (simples)"
+    logger.info("✅ Configurações simples carregadas com sucesso")
 except Exception as e:
-    logger.warning(f"⚠️  Falha ao carregar core.config: {e}")
+    logger.warning(f"⚠️  Falha ao carregar config simples: {e}")
 
+    # Tentativa 2: Configuração Pydantic (se a simples falhar)
     try:
-        # Fallback para configuração simples
-        from app.config import settings
+        from app.core.config import settings
 
-        config_source = "config (simples)"
-        logger.info("✅ Configurações simples carregadas com sucesso")
+        config_source = "core.config (Pydantic)"
+        logger.info("✅ Configurações Pydantic carregadas com sucesso")
     except Exception as e2:
-        logger.error(f"❌ Falha ao carregar config simples: {e2}")
-        logger.error("🔧 Verifique se o arquivo .env existe e está correto")
+        logger.error(f"❌ Falha ao carregar core.config: {e2}")
+        logger.error("🔧 Criando configurações mínimas de emergência...")
 
 
         # Último recurso: criar configurações mínimas em memória
         class MinimalSettings:
+            APP_NAME = "D&D VTT API"
+            DEBUG = True
             ALLOWED_ORIGINS = ["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000"]
             SOCKETIO_CORS_ORIGINS = "*"
             SOCKETIO_LOGGER = True
             SOCKETIO_ENGINEIO_LOGGER = True
-            DEBUG = True
+            SECRET_KEY = "emergency_key_please_change_in_production_" + "x" * 32
+            ALGORITHM = "HS256"
+            ACCESS_TOKEN_EXPIRE_MINUTES = 60
+            REFRESH_TOKEN_EXPIRE_DAYS = 30
+            MONGODB_URI = "mongodb://localhost:27017"
+            DB_NAME = "dnd_vtt"
 
 
         settings = MinimalSettings()
@@ -67,17 +75,19 @@ except Exception as e:
 
 print(f"⚙️  Configurações carregadas via: {config_source}")
 
-# Verificar ALLOWED_ORIGINS especificamente
+# Verificar e normalizar ALLOWED_ORIGINS
 if hasattr(settings, 'ALLOWED_ORIGINS'):
     origins = getattr(settings, 'ALLOWED_ORIGINS')
     print(f"🌐 ALLOWED_ORIGINS: {origins}")
+
     if not isinstance(origins, list):
         print(f"⚠️  ALLOWED_ORIGINS não é lista (tipo: {type(origins)}), convertendo...")
         if isinstance(origins, str):
+            # Converter string separada por vírgula em lista
             origins = [item.strip() for item in origins.split(',') if item.strip()]
             settings.ALLOWED_ORIGINS = origins
         else:
-            settings.ALLOWED_ORIGINS = ["http://localhost:3000"]
+            settings.ALLOWED_ORIGINS = ["http://localhost:3000", "http://localhost:3001"]
 elif hasattr(settings, 'ALLOW_ORIGINS'):
     origins = getattr(settings, 'ALLOW_ORIGINS')
     print(f"🌐 ALLOW_ORIGINS: {origins}")
@@ -87,6 +97,16 @@ else:
     print("⚠️  Nenhuma configuração CORS encontrada, usando padrão")
     settings.ALLOWED_ORIGINS = ["http://localhost:3000", "http://localhost:3001"]
 
+# Verificar SECRET_KEY
+if not hasattr(settings, 'SECRET_KEY') or not settings.SECRET_KEY or len(settings.SECRET_KEY) < 32:
+    import secrets
+
+    new_key = secrets.token_urlsafe(32)
+    print(f"⚠️  SECRET_KEY ausente ou inadequada. Gerando automaticamente...")
+    print(f"🔐 Adicione esta linha ao seu arquivo .env:")
+    print(f"SECRET_KEY={new_key}")
+    settings.SECRET_KEY = new_key
+
 # Importar python-socketio
 try:
     import socketio
@@ -95,7 +115,6 @@ try:
 except ImportError as e:
     logger.error(f"❌ Erro ao importar python-socketio: {e}")
     logger.error("🔧 Execute: pip install python-socketio[client]==5.8.0")
-    # Não fazer sys.exit aqui, permitir que continue sem Socket.IO
     socketio = None
 
 # Importar dependências opcionais
@@ -108,109 +127,106 @@ except ImportError:
     logger.warning("⚠️  Motor não disponível. MongoDB será desabilitado.")
     MONGODB_AVAILABLE = False
 
-# Importar módulos da aplicação (com tratamento de erro)
+# Tentar importar core.database com fallback
+db = None
 try:
-    from app.core.database import db
+    from app.core.database import get_database
 
     logger.info("✅ Database module carregado")
+    db = get_database
 except ImportError as e:
     logger.warning(f"⚠️  Database module não disponível: {e}")
-    db = None
 
+# Importar lock manager
+LockManager = None
 try:
-    from app.core.lock_manager import LockManager
+    from app.core.locks import LockManager
 
     logger.info("✅ Lock manager carregado")
 except ImportError as e:
     logger.warning(f"⚠️  Lock manager não disponível: {e}")
-    LockManager = None
 
+# Importar websocket manager
+WebSocketManager = None
 try:
     from app.websocket.manager import WebSocketManager
 
     logger.info("✅ WebSocket manager carregado")
 except ImportError as e:
     logger.warning(f"⚠️  WebSocket manager não disponível: {e}")
-    WebSocketManager = None
 
-# Importar routers (com tratamento de erro)
-routers_info = []
-
-try:
-    from app.routes.auth import router as auth_router
-
-    routers_info.append(("auth", auth_router, True))
-except ImportError as e:
-    logger.warning(f"⚠️  Auth router não disponível: {e}")
-    routers_info.append(("auth", None, False))
-
-try:
-    from app.routes.users import router as users_router
-
-    routers_info.append(("users", users_router, True))
-except ImportError as e:
-    logger.warning(f"⚠️  Users router não disponível: {e}")
-    routers_info.append(("users", None, False))
-
-try:
-    from app.routes.campaigns import router as campaigns_router
-
-    routers_info.append(("campaigns", campaigns_router, True))
-except ImportError as e:
-    logger.warning(f"⚠️  Campaigns router não disponível: {e}")
-    routers_info.append(("campaigns", None, False))
-
-try:
-    from app.routes.characters import router as characters_router
-
-    routers_info.append(("characters", characters_router, True))
-except ImportError as e:
-    logger.warning(f"⚠️  Characters router não disponível: {e}")
-    routers_info.append(("characters", None, False))
-
-try:
-    from app.routes.compendium import router as compendium_router
-
-    routers_info.append(("compendium", compendium_router, True))
-except ImportError as e:
-    logger.warning(f"⚠️  Compendium router não disponível: {e}")
-    routers_info.append(("compendium", None, False))
-
-# Global managers
-lock_manager = None
-websocket_manager = None
-
-# ===== SOCKET.IO SERVER SETUP =====
+# ===== CONFIGURAR SOCKET.IO =====
 sio = None
-if socketio:
+if socketio is not None:
     try:
-        cors_origins = getattr(settings, 'SOCKETIO_CORS_ORIGINS', '*')
-        socketio_logger = getattr(settings, 'SOCKETIO_LOGGER', True)
-        engineio_logger = getattr(settings, 'SOCKETIO_ENGINEIO_LOGGER', True)
-
         sio = socketio.AsyncServer(
-            cors_allowed_origins=cors_origins,
-            logger=socketio_logger,
-            engineio_logger=engineio_logger
+            cors_allowed_origins=getattr(settings, 'SOCKETIO_CORS_ORIGINS', "*"),
+            logger=getattr(settings, 'SOCKETIO_LOGGER', True),
+            engineio_logger=getattr(settings, 'SOCKETIO_ENGINEIO_LOGGER', True)
         )
-        logger.info("✅ Socket.IO server configurado")
+        logger.info("✅ Socket.IO server criado")
+
+        # Importar event handlers se disponíveis
+        try:
+            from app.websocket.event_handlers import register_handlers
+
+            register_handlers(sio)
+            logger.info("✅ Socket.IO event handlers registrados")
+        except ImportError as e:
+            logger.warning(f"⚠️  Socket.IO handlers não disponíveis: {e}")
+
     except Exception as e:
         logger.error(f"❌ Erro ao configurar Socket.IO: {e}")
         sio = None
+else:
+    logger.warning("⚠️  Socket.IO não será usado")
+
+# ===== IMPORTAR ROUTERS COM FALLBACK =====
+routers_info = []
+
+# Lista de routers para tentar importar
+router_modules = [
+    ("auth", "app.routes.auth", "auth_router"),
+    ("characters", "app.routes.characters", "characters_router"),
+    ("campaigns", "app.routes.campaigns", "campaigns_router"),
+    ("npcs", "app.routes.npcs", "npcs_router"),
+    ("compendium", "app.routes.compendium", "compendium_router"),
+    ("combat", "app.routes.combat", "combat_router"),
+]
+
+for router_name, module_path, router_attr in router_modules:
+    try:
+        module = __import__(module_path, fromlist=[router_attr])
+        router = getattr(module, router_attr, None)
+        if router is None:
+            # Tentar 'router' como fallback
+            router = getattr(module, 'router', None)
+
+        if router is not None:
+            routers_info.append((router_name, router, True))
+            logger.info(f"✅ Router {router_name} carregado")
+        else:
+            routers_info.append((router_name, None, False))
+            logger.warning(f"⚠️  Router {router_name} não encontrado no módulo")
+    except ImportError as e:
+        routers_info.append((router_name, None, False))
+        logger.warning(f"⚠️  Router {router_name} não pôde ser importado: {e}")
 
 
+# ===== LIFECYCLE EVENTS =====
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Gerencia o ciclo de vida da aplicação FastAPI.
-    """
     # Startup
     logger.info("🔧 Iniciando serviços...")
 
     # Inicializar database se disponível
     if db is not None and MONGODB_AVAILABLE:
         try:
-            await db.connect()
+            # Se db é uma função, chamá-la para obter a instância
+            if callable(db):
+                db_instance = await db()
+            else:
+                db_instance = db
             logger.info("✅ Database conectado")
         except Exception as e:
             logger.error(f"❌ Erro ao conectar database: {e}")
@@ -238,14 +254,6 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("🔄 Encerrando serviços...")
-
-    if db is not None:
-        try:
-            await db.disconnect()
-            logger.info("✅ Database desconectado")
-        except Exception as e:
-            logger.error(f"❌ Erro ao desconectar database: {e}")
-
     logger.info("👋 Aplicação encerrada")
 
 
@@ -277,7 +285,7 @@ app.add_middleware(
 for router_name, router, available in routers_info:
     if available and router is not None:
         try:
-            app.include_router(router, prefix=f"/{router_name}", tags=[router_name])
+            app.include_router(router, prefix=f"/api/{router_name}", tags=[router_name])
             logger.info(f"✅ Router {router_name} adicionado")
         except Exception as e:
             logger.error(f"❌ Erro ao adicionar router {router_name}: {e}")
@@ -306,51 +314,58 @@ async def root():
         "message": "D&D VTT Backend está funcionando!",
         "version": "1.0.0",
         "config_source": config_source,
-        "cors_origins": cors_origins,
-        "services": {
-            "database": MONGODB_AVAILABLE,
-            "socketio": sio is not None,
-            "routers": [name for name, _, available in routers_info if available]
-        }
+        "status": "healthy"
     }
 
 
 @app.get("/health")
 async def health_check():
-    """Endpoint para verificação de saúde da aplicação."""
+    """Endpoint de health check."""
     return {
         "status": "healthy",
-        "timestamp": "2025-06-17T14:13:23Z",
-        "services": {
-            "database": "available" if MONGODB_AVAILABLE else "unavailable",
-            "socketio": "available" if sio is not None else "unavailable"
-        }
+        "config_loaded": config_source,
+        "mongodb_available": MONGODB_AVAILABLE,
+        "socketio_available": sio is not None,
+        "routers_loaded": [name for name, _, available in routers_info if available]
     }
 
 
-# ===== LOG FINAL =====
-logger.info("=" * 60)
-logger.info("🎉 D&D VTT Backend configurado com sucesso!")
-logger.info(f"📊 Configuração: {config_source}")
-logger.info(f"🌐 CORS: {len(cors_origins)} origins permitidos")
-logger.info(f"🗄️  Database: {'✓' if MONGODB_AVAILABLE else '✗'}")
-logger.info(f"🔌 Socket.IO: {'✓' if sio else '✗'}")
-logger.info(f"🛣️  Routers: {sum(1 for _, _, available in routers_info if available)}/{len(routers_info)}")
-logger.info("=" * 60)
+# ===== HANDLER DE SAÚDE DO SOCKET.IO =====
+if sio is not None:
+    @sio.event
+    async def connect(sid, environ):
+        """Evento de conexão Socket.IO."""
+        logger.info(f"Cliente conectado: {sid}")
 
-# Para uso com uvicorn
+
+    @sio.event
+    async def disconnect(sid):
+        """Evento de desconexão Socket.IO."""
+        logger.info(f"Cliente desconectado: {sid}")
+
+
+    @sio.event
+    async def ping(sid, data):
+        """Responde ao ping do cliente."""
+        await sio.emit('pong', {'timestamp': data.get('timestamp')}, room=sid)
+
+# ===== EXPORTAR APLICAÇÃO =====
+# Para uso com servidores ASGI
+application = socket_app
+
+# Para compatibilidade
 if __name__ == "__main__":
     import uvicorn
 
-    host = getattr(settings, 'HOST', '0.0.0.0')
     port = getattr(settings, 'PORT', 8000)
+    host = getattr(settings, 'HOST', '0.0.0.0')
+    reload = getattr(settings, 'RELOAD', True) and getattr(settings, 'DEBUG', True)
 
     logger.info(f"🚀 Iniciando servidor em {host}:{port}")
-
     uvicorn.run(
-        socket_app,
+        "app.main:socket_app",
         host=host,
         port=port,
-        reload=debug,
+        reload=reload,
         log_level="info"
     )

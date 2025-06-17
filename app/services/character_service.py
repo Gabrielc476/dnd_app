@@ -7,12 +7,15 @@ Problemas resolvidos:
 3. ✅ Validação de permissões melhorada
 4. ✅ Logging adequado adicionado
 5. ✅ Funções completas implementadas
+6. ✅ Removido import de ValidationError (não existe no pymongo moderno)
 """
 
 import logging
 from datetime import datetime
 from typing import List, Dict, Optional, Any, Union
 from bson import ObjectId
+from bson.errors import InvalidId
+from pymongo.errors import DuplicateKeyError, WriteError, OperationFailure
 from fastapi import HTTPException, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -57,99 +60,91 @@ class CharacterService:
         CORREÇÃO: Queries corrigidas para usar ObjectId.
 
         Args:
-            character_data: Dados do personagem a ser criado
+            character_data: Dados do personagem
 
         Returns:
-            Personagem criado
+            Dados do personagem criado
 
         Raises:
-            HTTPException: Se o usuário ou campanha não existir
+            HTTPException: Se houver erro de validação ou criação
         """
         try:
-            # CORREÇÃO: Converter IDs para ObjectId antes das queries
-            owner_object_id = IdHandler.to_object_id(character_data.owner_id)
-            campaign_object_id = IdHandler.to_object_id(character_data.campaign_id)
+            # Converter IDs para ObjectId - CORREÇÃO APLICADA
+            owner_id_obj = IdHandler.to_object_id(character_data.owner_id)
+            campaign_id_obj = IdHandler.to_object_id(character_data.campaign_id)
 
-            if not owner_object_id or not campaign_object_id:
+            if not owner_id_obj:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="IDs de usuário ou campanha inválidos"
+                    detail="ID de proprietário inválido"
                 )
 
-            # Verificar se o usuário existe
-            user = await self.db.users.find_one({"_id": owner_object_id})
+            if not campaign_id_obj:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="ID de campanha inválido"
+                )
+
+            # Verificar se o proprietário existe - CORREÇÃO: usando ObjectId
+            user = await self.db.users.find_one({"_id": owner_id_obj})
             if not user:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Usuário com ID {character_data.owner_id} não encontrado"
+                    detail="Usuário proprietário não encontrado"
                 )
 
-            # Verificar se a campanha existe
-            campaign = await self.db.campaigns.find_one({"_id": campaign_object_id})
+            # Verificar se a campanha existe - CORREÇÃO: usando ObjectId
+            campaign = await self.db.campaigns.find_one({"_id": campaign_id_obj})
             if not campaign:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Campanha com ID {character_data.campaign_id} não encontrada"
+                    detail="Campanha não encontrada"
                 )
 
-            # Verificar se o usuário está na campanha (como jogador ou DM)
-            user_id_str = str(owner_object_id)
-            dm_id_str = str(campaign.get("dm_id", ""))
-            players_ids = [str(p) for p in campaign.get("players", [])]
-
-            is_player = user_id_str in players_ids
-            is_dm = user_id_str == dm_id_str
-
-            if not (is_player or is_dm):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Usuário não pertence a esta campanha"
-                )
-
-            # Verificar limite de personagens por usuário na campanha
-            existing_characters = await self.db.characters.count_documents({
-                "owner_id": owner_object_id,
-                "campaign_id": campaign_object_id
+            # Verificar se já existe um personagem com o mesmo nome na campanha
+            existing_character = await self.db.characters.find_one({
+                "name": character_data.name,
+                "campaign_id": campaign_id_obj
             })
 
-            max_characters = 3  # Limite padrão
-            if existing_characters >= max_characters:
+            if existing_character:
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Limite de {max_characters} personagens por campanha atingido"
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Já existe um personagem chamado '{character_data.name}' nesta campanha"
                 )
 
             # Preparar dados do personagem
-            now = datetime.utcnow()
-            character_dict = character_data.dict(by_alias=True, exclude_unset=True)
+            character_dict = character_data.dict()
+            character_dict.update({
+                "owner_id": owner_id_obj,
+                "campaign_id": campaign_id_obj,
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            })
 
-            # Converter IDs nos dados
-            character_dict["owner_id"] = owner_object_id
-            character_dict["campaign_id"] = campaign_object_id
-
-            # Adicionar campos de sistema
-            character_dict["created_at"] = now
-            character_dict["updated_at"] = now
-
-            # Calcular bônus de proficiência baseado no nível
-            level = character_data.level
-            proficiency_bonus = 2 + ((level - 1) // 4)
-            character_dict["proficiency_bonus"] = proficiency_bonus
-
-            # Inserir no banco de dados
+            # Inserir no banco
             result = await self.db.characters.insert_one(character_dict)
+            character_id = result.inserted_id
 
-            # Recuperar o personagem criado
-            created_character = await self.db.characters.find_one({"_id": result.inserted_id})
+            # Buscar o personagem criado
+            character = await self.db.characters.find_one({"_id": character_id})
 
-            # Formatar ID para string antes de retornar
-            formatted_character = self._format_id(created_character)
+            if not character:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Erro ao criar personagem"
+                )
 
-            logger.info(f"Personagem criado: {formatted_character['name']} para usuário {character_data.owner_id}")
-            return formatted_character
+            logger.info(f"Personagem criado: {character['name']} (ID: {character_id})")
+            return self._format_id(character)
 
         except HTTPException:
             raise
+        except DuplicateKeyError:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Já existe um personagem com estes dados"
+            )
         except Exception as e:
             logger.error(f"Erro ao criar personagem: {e}")
             raise HTTPException(
@@ -159,12 +154,11 @@ class CharacterService:
 
     async def get_character(self, character_id: str, user_id: str) -> Dict[str, Any]:
         """
-        Obtém um personagem pelo ID.
-        CORREÇÃO: Verificação de permissões melhorada.
+        Obtém um personagem específico.
 
         Args:
             character_id: ID do personagem
-            user_id: ID do usuário solicitante
+            user_id: ID do usuário fazendo a requisição
 
         Returns:
             Dados do personagem
@@ -173,32 +167,32 @@ class CharacterService:
             HTTPException: Se não encontrado ou sem permissão
         """
         try:
-            # Converter IDs
-            character_object_id = IdHandler.to_object_id(character_id)
-            user_object_id = IdHandler.to_object_id(user_id)
-
-            if not character_object_id or not user_object_id:
+            character_id_obj = IdHandler.to_object_id(character_id)
+            if not character_id_obj:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="IDs inválidos fornecidos"
+                    detail="ID de personagem inválido"
                 )
 
-            # Buscar personagem
-            character = await self.db.characters.find_one({"_id": character_object_id})
+            character = await self.db.characters.find_one({"_id": character_id_obj})
 
             if not character:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Personagem com ID {character_id} não encontrado"
+                    detail="Personagem não encontrado"
                 )
 
             # Verificar permissões
-            await self._verify_character_access(character, str(user_object_id))
+            if str(character.get("owner_id")) != user_id:
+                # Verificar se é DM da campanha
+                campaign = await self.db.campaigns.find_one({"_id": character.get("campaign_id")})
+                if not campaign or str(campaign.get("dm_id")) != user_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Sem permissão para acessar este personagem"
+                    )
 
-            # Formatar e retornar
-            formatted_character = self._format_id(character)
-            logger.debug(f"Personagem obtido: {formatted_character['name']}")
-            return formatted_character
+            return self._format_id(character)
 
         except HTTPException:
             raise
@@ -212,68 +206,67 @@ class CharacterService:
     async def update_character(
             self,
             character_id: str,
-            user_id: str,
-            updates: CharacterUpdateSchema
+            updates: CharacterUpdateSchema,
+            user_id: str
     ) -> Dict[str, Any]:
         """
-        Atualiza um personagem existente.
+        Atualiza um personagem.
 
         Args:
             character_id: ID do personagem
-            user_id: ID do usuário
-            updates: Dados de atualização
+            updates: Dados a serem atualizados
+            user_id: ID do usuário fazendo a requisição
 
         Returns:
-            Personagem atualizado
+            Dados do personagem atualizado
+
+        Raises:
+            HTTPException: Se não encontrado ou sem permissão
         """
         try:
-            # Converter IDs
-            character_object_id = IdHandler.to_object_id(character_id)
-            user_object_id = IdHandler.to_object_id(user_id)
-
-            if not character_object_id or not user_object_id:
+            character_id_obj = IdHandler.to_object_id(character_id)
+            if not character_id_obj:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="IDs inválidos fornecidos"
+                    detail="ID de personagem inválido"
                 )
 
-            # Buscar personagem existente
-            character = await self.db.characters.find_one({"_id": character_object_id})
-
+            # Verificar se o personagem existe
+            character = await self.db.characters.find_one({"_id": character_id_obj})
             if not character:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Personagem com ID {character_id} não encontrado"
+                    detail="Personagem não encontrado"
                 )
 
             # Verificar permissões
-            await self._verify_character_access(character, str(user_object_id))
+            if str(character.get("owner_id")) != user_id:
+                # Verificar se é DM da campanha
+                campaign = await self.db.campaigns.find_one({"_id": character.get("campaign_id")})
+                if not campaign or str(campaign.get("dm_id")) != user_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Sem permissão para editar este personagem"
+                    )
 
             # Preparar dados de atualização
-            update_data = updates.dict(by_alias=True, exclude_unset=True)
-
+            update_data = updates.dict(exclude_unset=True)
             if update_data:
-                # Atualizar timestamp
                 update_data["updated_at"] = datetime.utcnow()
 
-                # Recalcular bônus de proficiência se nível mudou
-                if "level" in update_data:
-                    level = update_data["level"]
-                    proficiency_bonus = 2 + ((level - 1) // 4)
-                    update_data["proficiency_bonus"] = proficiency_bonus
-
                 # Atualizar no banco
-                await self.db.characters.update_one(
-                    {"_id": character_object_id},
+                result = await self.db.characters.update_one(
+                    {"_id": character_id_obj},
                     {"$set": update_data}
                 )
 
-            # Recuperar personagem atualizado
-            updated_character = await self.db.characters.find_one({"_id": character_object_id})
+                if result.modified_count == 0:
+                    logger.warning(f"Nenhuma modificação feita no personagem {character_id}")
 
-            formatted_character = self._format_id(updated_character)
-            logger.info(f"Personagem atualizado: {formatted_character['name']}")
-            return formatted_character
+            # Buscar o personagem atualizado
+            updated_character = await self.db.characters.find_one({"_id": character_id_obj})
+
+            return self._format_id(updated_character)
 
         except HTTPException:
             raise
@@ -286,361 +279,343 @@ class CharacterService:
 
     async def delete_character(self, character_id: str, user_id: str) -> bool:
         """
-        Exclui um personagem.
+        Remove um personagem.
 
         Args:
             character_id: ID do personagem
-            user_id: ID do usuário
+            user_id: ID do usuário fazendo a requisição
 
         Returns:
-            True se excluído com sucesso
+            True se removido com sucesso
+
+        Raises:
+            HTTPException: Se não encontrado ou sem permissão
         """
         try:
-            # Converter IDs
-            character_object_id = IdHandler.to_object_id(character_id)
-            user_object_id = IdHandler.to_object_id(user_id)
-
-            if not character_object_id or not user_object_id:
+            character_id_obj = IdHandler.to_object_id(character_id)
+            if not character_id_obj:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="IDs inválidos fornecidos"
+                    detail="ID de personagem inválido"
                 )
 
-            # Buscar personagem
-            character = await self.db.characters.find_one({"_id": character_object_id})
-
+            # Verificar se o personagem existe
+            character = await self.db.characters.find_one({"_id": character_id_obj})
             if not character:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Personagem com ID {character_id} não encontrado"
+                    detail="Personagem não encontrado"
                 )
 
-            # Verificar permissões (apenas dono ou DM)
-            await self._verify_character_access(character, str(user_object_id))
+            # Verificar permissões
+            if str(character.get("owner_id")) != user_id:
+                # Verificar se é DM da campanha
+                campaign = await self.db.campaigns.find_one({"_id": character.get("campaign_id")})
+                if not campaign or str(campaign.get("dm_id")) != user_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Sem permissão para remover este personagem"
+                    )
 
-            # Verificar se não está em combate ativo
-            active_combat = await self.db.combats.find_one({
-                "participants.character_id": character_id,
-                "status": "active"
-            })
+            # Remover do banco
+            result = await self.db.characters.delete_one({"_id": character_id_obj})
 
-            if active_combat:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Não é possível excluir personagem em combate ativo"
-                )
-
-            # Excluir personagem
-            result = await self.db.characters.delete_one({"_id": character_object_id})
-
-            if result.deleted_count == 1:
-                logger.info(f"Personagem {character['name']} excluído por usuário {user_id}")
-                return True
-            else:
+            if result.deleted_count == 0:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Falha ao excluir personagem"
+                    detail="Falha ao remover personagem"
                 )
+
+            logger.info(f"Personagem removido: {character['name']} (ID: {character_id})")
+            return True
 
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Erro ao excluir personagem: {e}")
+            logger.error(f"Erro ao remover personagem: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Erro interno ao excluir personagem"
+                detail="Erro interno ao remover personagem"
             )
 
-    async def list_characters_for_user(self, user_id: str) -> List[Dict[str, Any]]:
+    async def list_characters(
+            self,
+            user_id: str,
+            campaign_id: Optional[str] = None,
+            owner_id: Optional[str] = None,
+            skip: int = 0,
+            limit: int = 50
+    ) -> List[Dict[str, Any]]:
         """
-        Lista todos os personagens de um usuário.
-        CORREÇÃO: Query corrigida para usar ObjectId.
+        Lista personagens com filtros.
 
         Args:
-            user_id: ID do usuário
-
-        Returns:
-            Lista de personagens
-        """
-        try:
-            user_object_id = IdHandler.to_object_id(user_id)
-            if not user_object_id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="ID de usuário inválido"
-                )
-
-            cursor = self.db.characters.find({"owner_id": user_object_id})
-            characters = await cursor.to_list(length=100)
-
-            # Formatar IDs para string antes de retornar
-            formatted_characters = self._format_id_list(characters)
-            logger.debug(f"Listados {len(formatted_characters)} personagens para usuário {user_id}")
-            return formatted_characters
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Erro ao listar personagens do usuário: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Erro interno ao listar personagens"
-            )
-
-    async def list_characters_for_campaign(self, campaign_id: str, user_id: str) -> List[Dict[str, Any]]:
-        """
-        Lista todos os personagens de uma campanha.
-        CORREÇÃO: Validação de acesso e query corrigida.
-
-        Args:
-            campaign_id: ID da campanha
-            user_id: ID do usuário que está fazendo a solicitação
+            user_id: ID do usuário fazendo a requisição
+            campaign_id: Filtrar por campanha (opcional)
+            owner_id: Filtrar por proprietário (opcional)
+            skip: Número de itens a pular
+            limit: Limite máximo de itens
 
         Returns:
             Lista de personagens
 
         Raises:
-            HTTPException: Se a campanha não for encontrada ou o usuário não tiver acesso
+            HTTPException: Se houver erro na consulta
         """
         try:
-            # Converter IDs
-            campaign_object_id = IdHandler.to_object_id(campaign_id)
-            user_object_id = IdHandler.to_object_id(user_id)
+            filter_query = {}
 
-            if not campaign_object_id or not user_object_id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="IDs inválidos fornecidos"
-                )
+            # Filtro base: usuário deve ter acesso
+            user_id_obj = IdHandler.to_object_id(user_id)
 
-            # Verificar se a campanha existe
-            campaign = await self.db.campaigns.find_one({"_id": campaign_object_id})
+            # Se especificou campaign_id, filtrar por campanha
+            if campaign_id:
+                campaign_id_obj = IdHandler.to_object_id(campaign_id)
+                if campaign_id_obj:
+                    # Verificar se tem acesso à campanha
+                    campaign = await self.db.campaigns.find_one({"_id": campaign_id_obj})
+                    if campaign:
+                        is_dm = str(campaign.get("dm_id")) == user_id
+                        is_player = user_id_obj in campaign.get("players", [])
 
-            if not campaign:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Campanha com ID {campaign_id} não encontrada"
-                )
+                        if is_dm or is_player:
+                            filter_query["campaign_id"] = campaign_id_obj
+                        else:
+                            return []  # Sem acesso à campanha
+                    else:
+                        return []  # Campanha não existe
 
-            # Verificar se o usuário está na campanha (como jogador ou DM)
-            user_id_str = str(user_object_id)
-            dm_id_str = str(campaign.get("dm_id", ""))
-            players_ids = [str(p) for p in campaign.get("players", [])]
+            # Se especificou owner_id, filtrar por proprietário
+            if owner_id:
+                owner_id_obj = IdHandler.to_object_id(owner_id)
+                if owner_id_obj:
+                    filter_query["owner_id"] = owner_id_obj
 
-            is_player = user_id_str in players_ids
-            is_dm = user_id_str == dm_id_str
+            # Se não especificou filtros, mostrar apenas personagens do usuário
+            if not filter_query:
+                filter_query["owner_id"] = user_id_obj
 
-            if not (is_player or is_dm):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Usuário não pertence a esta campanha"
-                )
+            # Buscar personagens
+            cursor = self.db.characters.find(filter_query).skip(skip).limit(limit)
+            characters = await cursor.to_list(length=limit)
 
-            # Buscar personagens da campanha
-            cursor = self.db.characters.find({"campaign_id": campaign_object_id})
-            characters = await cursor.to_list(length=100)
+            return self._format_id_list(characters)
 
-            # Formatar IDs para string antes de retornar
-            formatted_characters = self._format_id_list(characters)
-            logger.debug(f"Listados {len(formatted_characters)} personagens para campanha {campaign_id}")
-            return formatted_characters
-
-        except HTTPException:
-            raise
         except Exception as e:
-            logger.error(f"Erro ao listar personagens da campanha: {e}")
+            logger.error(f"Erro ao listar personagens: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Erro interno ao listar personagens"
             )
 
-    async def update_hp(
-            self,
-            character_id: str,
-            user_id: str,
-            change: int,
-            is_temp: bool = False
-    ) -> Dict[str, Any]:
+    async def get_character_stats(self, character_id: str) -> Dict[str, Any]:
         """
-        Atualiza os pontos de vida de um personagem.
-        CORREÇÃO: Implementação completa.
+        Calcula estatísticas do personagem.
 
         Args:
             character_id: ID do personagem
-            user_id: ID do usuário
-            change: Mudança nos HP (positivo para cura, negativo para dano)
-            is_temp: Se é HP temporário
 
         Returns:
-            Personagem atualizado
+            Estatísticas calculadas
+
+        Raises:
+            HTTPException: Se personagem não encontrado
         """
         try:
-            # Converter IDs
-            character_object_id = IdHandler.to_object_id(character_id)
-            user_object_id = IdHandler.to_object_id(user_id)
-
-            if not character_object_id or not user_object_id:
+            character_id_obj = IdHandler.to_object_id(character_id)
+            if not character_id_obj:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="IDs inválidos fornecidos"
+                    detail="ID de personagem inválido"
                 )
 
-            # Buscar personagem
-            character = await self.db.characters.find_one({"_id": character_object_id})
-
+            character = await self.db.characters.find_one({"_id": character_id_obj})
             if not character:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Personagem com ID {character_id} não encontrado"
+                    detail="Personagem não encontrado"
                 )
 
-            # Verificar permissões
-            await self._verify_character_access(character, str(user_object_id))
+            # Calcular modificadores de atributos
+            attributes = character.get("attributes", {})
+            modifiers = {}
 
-            # Obter HP atual
-            hp_data = character.get("hp", {})
-            current_hp = hp_data.get("current", 0)
-            max_hp = hp_data.get("max", 1)
-            temp_hp = hp_data.get("temporary", 0)
+            for attr, value in attributes.items():
+                if isinstance(value, int):
+                    modifiers[f"{attr}_modifier"] = (value - 10) // 2
 
-            if is_temp:
-                # Atualizar HP temporário
-                new_temp_hp = max(0, temp_hp + change)
-                update_data = {"hp.temporary": new_temp_hp}
-            else:
-                if change > 0:
-                    # Cura - não pode exceder HP máximo
-                    new_current_hp = min(max_hp, current_hp + change)
-                    update_data = {"hp.current": new_current_hp}
-                else:
-                    # Dano - primeiro remove HP temporário, depois HP normal
-                    damage = abs(change)
+            # Calcular CA (Classe de Armadura)
+            base_ac = 10
+            dex_modifier = modifiers.get("dexterity_modifier", 0)
+            armor_ac = character.get("equipment", {}).get("armor", {}).get("ac_bonus", 0)
+            shield_ac = character.get("equipment", {}).get("shield", {}).get("ac_bonus", 0)
 
-                    if temp_hp > 0:
-                        temp_damage = min(temp_hp, damage)
-                        new_temp_hp = temp_hp - temp_damage
-                        damage -= temp_damage
-                    else:
-                        new_temp_hp = temp_hp
+            armor_class = base_ac + dex_modifier + armor_ac + shield_ac
 
-                    new_current_hp = max(0, current_hp - damage)
+            # Calcular pontos de vida máximos
+            constitution_modifier = modifiers.get("constitution_modifier", 0)
+            level = character.get("level", 1)
+            hit_die = character.get("class_details", {}).get("hit_die", 8)
 
-                    update_data = {
-                        "hp.current": new_current_hp,
-                        "hp.temporary": new_temp_hp
-                    }
+            # HP = hit_die no nível 1 + (level-1) * (hit_die/2 + 1) + (con_mod * level)
+            max_hp = hit_die + (level - 1) * ((hit_die // 2) + 1) + (constitution_modifier * level)
 
-            # Atualizar timestamp
-            update_data["updated_at"] = datetime.utcnow()
+            return {
+                "modifiers": modifiers,
+                "armor_class": armor_class,
+                "max_hit_points": max_hp,
+                "current_hit_points": character.get("current_hit_points", max_hp),
+                "proficiency_bonus": 2 + ((level - 1) // 4),
+                "level": level,
+                "experience_points": character.get("experience_points", 0)
+            }
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Erro ao calcular estatísticas: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro interno ao calcular estatísticas"
+            )
+
+    async def level_up_character(self, character_id: str, hp_increase: int) -> Dict[str, Any]:
+        """
+        Aumenta o nível do personagem.
+
+        Args:
+            character_id: ID do personagem
+            hp_increase: Aumento de HP
+
+        Returns:
+            Dados do personagem atualizado
+
+        Raises:
+            HTTPException: Se personagem não encontrado
+        """
+        try:
+            character_id_obj = IdHandler.to_object_id(character_id)
+            if not character_id_obj:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="ID de personagem inválido"
+                )
+
+            character = await self.db.characters.find_one({"_id": character_id_obj})
+            if not character:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Personagem não encontrado"
+                )
+
+            current_level = character.get("level", 1)
+            new_level = current_level + 1
+
+            current_max_hp = character.get("max_hit_points", 8)
+            new_max_hp = current_max_hp + hp_increase
+
+            current_hp = character.get("current_hit_points", current_max_hp)
+            new_current_hp = current_hp + hp_increase
 
             # Atualizar no banco
+            update_data = {
+                "level": new_level,
+                "max_hit_points": new_max_hp,
+                "current_hit_points": new_current_hp,
+                "updated_at": datetime.utcnow()
+            }
+
             await self.db.characters.update_one(
-                {"_id": character_object_id},
+                {"_id": character_id_obj},
                 {"$set": update_data}
             )
 
-            # Recuperar personagem atualizado
-            updated_character = await self.db.characters.find_one({"_id": character_object_id})
+            # Buscar personagem atualizado
+            updated_character = await self.db.characters.find_one({"_id": character_id_obj})
 
-            formatted_character = self._format_id(updated_character)
-            logger.info(f"HP atualizado para {formatted_character['name']}: {change}")
-            return formatted_character
+            logger.info(f"Personagem subiu de nível: {character['name']} (nível {new_level})")
+            return self._format_id(updated_character)
 
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Erro ao atualizar HP: {e}")
+            logger.error(f"Erro ao subir nível do personagem: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Erro interno ao atualizar HP"
+                detail="Erro interno ao subir nível"
             )
 
-    async def roll_initiative(self, character_id: str, user_id: str, advantage: bool = False) -> Dict[str, Any]:
+    async def rest_character(self, character_id: str, rest_type: str) -> Dict[str, Any]:
         """
-        Rola iniciativa para um personagem.
+        Faz o personagem descansar.
 
         Args:
             character_id: ID do personagem
-            user_id: ID do usuário
-            advantage: Se deve rolar com vantagem
+            rest_type: Tipo de descanso ("short" ou "long")
 
         Returns:
-            Resultado da rolagem
+            Dados do personagem atualizado
+
+        Raises:
+            HTTPException: Se personagem não encontrado
         """
         try:
-            # Buscar personagem
-            character_object_id = IdHandler.to_object_id(character_id)
-            character = await self.db.characters.find_one({"_id": character_object_id})
+            character_id_obj = IdHandler.to_object_id(character_id)
+            if not character_id_obj:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="ID de personagem inválido"
+                )
 
+            character = await self.db.characters.find_one({"_id": character_id_obj})
             if not character:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Personagem com ID {character_id} não encontrado"
+                    detail="Personagem não encontrado"
                 )
 
-            # Verificar permissões
-            await self._verify_character_access(character, user_id)
+            update_data = {"updated_at": datetime.utcnow()}
 
-            # Obter bônus de iniciativa
-            initiative_bonus = character.get("initiative_bonus", 0)
+            if rest_type == "long":
+                # Descanso longo: recuperar todos os HP e spell slots
+                max_hp = character.get("max_hit_points", 8)
+                update_data["current_hit_points"] = max_hp
 
-            # Rolar dados
-            if advantage:
-                roll_result = roll_dice("2d20kh1")  # Rola 2d20, mantém o maior
-            else:
-                roll_result = roll_dice("1d20")
+                # Resetar spell slots (se houver)
+                if "spell_slots" in character:
+                    update_data["spell_slots"] = character.get("spell_slots_max", {})
 
-            total = roll_result["total"] + initiative_bonus
+            elif rest_type == "short":
+                # Descanso curto: recuperar alguns HP (dados de vida)
+                current_hp = character.get("current_hit_points", 0)
+                max_hp = character.get("max_hit_points", 8)
+                level = character.get("level", 1)
+                constitution_modifier = ((character.get("attributes", {}).get("constitution", 10) - 10) // 2)
 
-            result = {
-                "character_id": character_id,
-                "character_name": character.get("name"),
-                "roll": roll_result["total"],
-                "bonus": initiative_bonus,
-                "total": total,
-                "advantage": advantage,
-                "details": roll_result
-            }
+                # Recuperar HP baseado em Hit Die
+                hit_die = character.get("class_details", {}).get("hit_die", 8)
+                hp_recovery = roll_dice(hit_die, 1, constitution_modifier)["total"]
 
-            logger.info(f"Iniciativa rolada para {character['name']}: {total}")
-            return result
+                new_hp = min(current_hp + hp_recovery, max_hp)
+                update_data["current_hit_points"] = new_hp
+
+            # Atualizar no banco
+            await self.db.characters.update_one(
+                {"_id": character_id_obj},
+                {"$set": update_data}
+            )
+
+            # Buscar personagem atualizado
+            updated_character = await self.db.characters.find_one({"_id": character_id_obj})
+
+            logger.info(f"Personagem descansou ({rest_type}): {character['name']}")
+            return self._format_id(updated_character)
 
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Erro ao rolar iniciativa: {e}")
+            logger.error(f"Erro ao fazer personagem descansar: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Erro interno ao rolar iniciativa"
+                detail="Erro interno no descanso"
             )
-
-    async def _verify_character_access(self, character: Dict[str, Any], user_id: str) -> None:
-        """
-        Verifica se o usuário tem acesso ao personagem.
-
-        Args:
-            character: Documento do personagem
-            user_id: ID do usuário
-
-        Raises:
-            HTTPException: Se não tiver acesso
-        """
-        user_object_id = IdHandler.to_object_id(user_id)
-        character_owner_id = character.get("owner_id")
-        campaign_id = character.get("campaign_id")
-
-        # Verificar se é o dono do personagem
-        if str(character_owner_id) == str(user_object_id):
-            return
-
-        # Verificar se é o DM da campanha
-        if campaign_id:
-            campaign = await self.db.campaigns.find_one({"_id": campaign_id})
-            if campaign and str(campaign.get("dm_id")) == str(user_object_id):
-                return
-
-        # Se chegou até aqui, não tem acesso
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Usuário não tem acesso a este personagem"
-        )

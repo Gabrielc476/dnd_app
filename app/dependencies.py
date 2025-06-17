@@ -1,12 +1,14 @@
 # app/dependencies.py
 """
-Dependencies para FastAPI - CORRIGIDO
+Dependencies para FastAPI - CORRIGIDO PARA PyJWT
 Problemas resolvidos:
 1. ✅ Removidos prints de debug inseguros
 2. ✅ Melhorado tratamento de exceções específicas
 3. ✅ Corrigida conversão de ObjectId
 4. ✅ Adicionado logging adequado
 5. ✅ Implementadas validações de permissão
+6. ✅ Migrado para PyJWT (compatibility fix)
+7. ✅ ADICIONADA verify_character_access que estava faltando
 """
 
 import logging
@@ -216,9 +218,9 @@ async def verify_campaign_access(
 
     Args:
         campaign_id: ID da campanha
-        user: Usuário fazendo a requisição
-        db: Conexão com banco de dados
-        require_dm: Se True, requer que o usuário seja o DM da campanha
+        user: Usuário atual
+        db: Conexão com o banco de dados
+        require_dm: Se requer privilégios de DM
 
     Returns:
         Documento da campanha
@@ -226,47 +228,43 @@ async def verify_campaign_access(
     Raises:
         HTTPException: Se não tiver acesso ou campanha não existir
     """
-    try:
-        campaign_object_id = IdHandler.to_object_id(campaign_id)
-        if campaign_object_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="ID de campanha inválido"
-            )
-
-        campaign = await db.campaigns.find_one({"_id": campaign_object_id})
-        if not campaign:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Campanha não encontrada"
-            )
-
-        user_id_str = str(user.id)
-        is_dm = str(campaign.get("dm_id", "")) == user_id_str
-        is_player = user_id_str in [str(p) for p in campaign.get("players", [])]
-
-        if require_dm and not is_dm:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Operação requer privilégios de DM da campanha"
-            )
-
-        if not (is_dm or is_player):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Usuário não tem acesso a esta campanha"
-            )
-
-        return campaign
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Erro ao verificar acesso à campanha: {type(e).__name__}")
+    campaign_object_id = IdHandler.to_object_id(campaign_id)
+    if campaign_object_id is None:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Erro interno ao verificar acesso"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ID de campanha inválido"
         )
+
+    campaign = await db.campaigns.find_one({"_id": campaign_object_id})
+    if campaign is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Campanha não encontrada"
+        )
+
+    user_object_id = IdHandler.to_object_id(str(user.id))
+
+    # Verificar se é o DM da campanha
+    is_dm = campaign.get("dm_id") == user_object_id
+
+    # Verificar se é um jogador na campanha
+    players = campaign.get("players", [])
+    is_player = user_object_id in players
+
+    # Verificar acesso
+    if require_dm and not is_dm:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Operação requer privilégios de Dungeon Master"
+        )
+
+    if not (is_dm or is_player):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado à campanha"
+        )
+
+    return campaign
 
 
 async def verify_character_access(
@@ -305,18 +303,33 @@ async def verify_character_access(
                 detail="Personagem não encontrado"
             )
 
-        user_id_str = str(user.id)
-        is_owner = str(character.get("owner_id", "")) == user_id_str
+        user_object_id = IdHandler.to_object_id(str(user.id))
+        is_owner = character.get("owner_id") == user_object_id
 
         # Se não é o dono, verificar se é DM da campanha (se permitido)
         if not is_owner and allow_dm:
-            campaign = await verify_campaign_access(
-                str(character.get("campaign_id", "")),
-                user,
-                db,
-                require_dm=True
-            )
-            # Se chegou até aqui, é DM da campanha
+            campaign_id = character.get("campaign_id")
+            if campaign_id:
+                try:
+                    campaign = await verify_campaign_access(
+                        str(campaign_id),
+                        user,
+                        db,
+                        require_dm=True
+                    )
+                    # Se chegou até aqui, é DM da campanha
+                    logger.debug(f"Acesso de DM concedido ao personagem {character_id}")
+                except HTTPException:
+                    # Se falhou a verificação de DM, negar acesso
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Usuário não tem acesso a este personagem"
+                    )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Personagem não está associado a uma campanha"
+                )
         elif not is_owner:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -333,3 +346,64 @@ async def verify_character_access(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Erro interno ao verificar acesso"
         )
+
+
+async def get_campaign_with_access(
+        campaign_id: str,
+        current_user: User = Depends(get_current_active_user),
+        db: AsyncIOMotorDatabase = Depends(get_database)
+) -> dict:
+    """
+    Dependency que verifica acesso e retorna a campanha.
+
+    Args:
+        campaign_id: ID da campanha
+        current_user: Usuário atual
+        db: Conexão com o banco de dados
+
+    Returns:
+        Documento da campanha
+    """
+    return await verify_campaign_access(campaign_id, current_user, db)
+
+
+async def get_campaign_with_dm_access(
+        campaign_id: str,
+        current_user: User = Depends(get_current_active_user),
+        db: AsyncIOMotorDatabase = Depends(get_database)
+) -> dict:
+    """
+    Dependency que verifica acesso de DM e retorna a campanha.
+
+    Args:
+        campaign_id: ID da campanha
+        current_user: Usuário atual (deve ser DM)
+        db: Conexão com o banco de dados
+
+    Returns:
+        Documento da campanha
+    """
+    return await verify_campaign_access(campaign_id, current_user, db, require_dm=True)
+
+
+async def get_character_with_access(
+        character_id: str,
+        current_user: User = Depends(get_current_active_user),
+        db: AsyncIOMotorDatabase = Depends(get_database)
+) -> dict:
+    """
+    Dependency que verifica acesso e retorna o personagem.
+
+    Args:
+        character_id: ID do personagem
+        current_user: Usuário atual
+        db: Conexão com o banco de dados
+
+    Returns:
+        Documento do personagem
+    """
+    return await verify_character_access(character_id, current_user, db)
+
+
+# Alias para compatibilidade
+get_db = get_database

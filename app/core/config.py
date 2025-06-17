@@ -1,435 +1,136 @@
 # app/core/config.py
 """
-Configuration settings - CORRIGIDO
-Configurações centralizadas da aplicação com validação adequada.
-Resolve problemas de SECRET_KEY e integração com python-socketio.
+Configuração SIMPLES usando apenas dotenv
+Sem Pydantic, sem validators, sem complicação.
+Compatível com o main.py existente.
 """
 
 import os
 import secrets
-from datetime import datetime
-from typing import List, Optional, Any
-from pydantic import BaseSettings, validator, Field
+from dotenv import load_dotenv
+
+# Carrega o .env
+load_dotenv()
 
 
-class Settings(BaseSettings):
-    """
-    Configurações da aplicação usando Pydantic BaseSettings.
-    Carrega automaticamente variáveis de ambiente do arquivo .env
-    """
+class Settings:
+    """Configurações simples e funcionais - compatível com main.py existente"""
 
     # ===== APLICAÇÃO =====
-    APP_NAME: str = "D&D Virtual Tabletop API"
-    APP_VERSION: str = "1.0.0"
-    API_V1_STR: str = "/api"
-    DEBUG: bool = False
-    ENVIRONMENT: str = Field(default="development", env="ENVIRONMENT")
+    APP_NAME = os.getenv("APP_NAME", "D&D Virtual Tabletop API")
+    DEBUG = os.getenv("DEBUG", "true").lower() in ("true", "1", "yes")
+    ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
     # ===== SERVIDOR =====
-    HOST: str = "0.0.0.0"
-    PORT: int = 8000
-    RELOAD: bool = True
-
-    # ===== CORS =====
-    ALLOWED_ORIGINS: List[str] = [
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001"
-    ]
+    HOST = os.getenv("HOST", "0.0.0.0")
+    PORT = int(os.getenv("PORT", "8000"))
+    RELOAD = True  # Para compatibilidade com main.py
 
     # ===== SEGURANÇA =====
-    SECRET_KEY: str = Field(
-        default_factory=lambda: secrets.token_urlsafe(32),
-        env="SECRET_KEY",
-        description="Chave secreta para JWT - deve ter pelo menos 32 caracteres"
-    )
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 horas
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 30  # 30 dias
+    SECRET_KEY = os.getenv("SECRET_KEY")
+    if not SECRET_KEY or len(SECRET_KEY) < 32:
+        SECRET_KEY = secrets.token_urlsafe(32)
+        print(f"⚠️  SECRET_KEY gerada automaticamente: {SECRET_KEY}")
+        print("🔧 Adicione ao seu .env:")
+        print(f"SECRET_KEY={SECRET_KEY}")
+
+    ALGORITHM = os.getenv("ALGORITHM", "HS256")
+    ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
+    REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "30"))
 
     # ===== BANCO DE DADOS =====
-    MONGODB_URI: str = Field(
-        default="mongodb://localhost:27017",
-        env="MONGODB_URI",
-        description="URI de conexão com MongoDB"
-    )
-    DB_NAME: str = Field(default="dnd_vtt", env="DB_NAME")
+    MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+    DB_NAME = os.getenv("DB_NAME", "dnd_vtt")
 
-    # Configurações de conexão MongoDB
-    MONGODB_MIN_POOL_SIZE: int = 10
-    MONGODB_MAX_POOL_SIZE: int = 50
-    MONGODB_MAX_IDLE_TIME_MS: int = 30000
+    # ===== CORS =====
+    _cors_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000")
+    ALLOWED_ORIGINS = [origin.strip() for origin in _cors_origins.split(",") if origin.strip()]
 
-    # ===== REDIS (OPCIONAL) =====
-    REDIS_URL: Optional[str] = Field(default=None, env="REDIS_URL")
-    REDIS_EXPIRE_SECONDS: int = 3600
+    # ===== SOCKET.IO =====
+    SOCKETIO_CORS_ORIGINS = os.getenv("SOCKETIO_CORS_ORIGINS", "*")
+    SOCKETIO_LOGGER = os.getenv("SOCKETIO_LOGGER", "true").lower() in ("true", "1", "yes")
+    SOCKETIO_ENGINEIO_LOGGER = os.getenv("SOCKETIO_ENGINEIO_LOGGER", "true").lower() in ("true", "1", "yes")
 
-    # ===== EMAIL (FUTURO) =====
-    SMTP_SERVER: Optional[str] = Field(default=None, env="SMTP_SERVER")
-    SMTP_PORT: int = 587
-    SMTP_USERNAME: Optional[str] = Field(default=None, env="SMTP_USERNAME")
-    SMTP_PASSWORD: Optional[str] = Field(default=None, env="SMTP_PASSWORD")
-    SMTP_FROM_EMAIL: Optional[str] = Field(default=None, env="SMTP_FROM_EMAIL")
-
-    # ===== LOGGING =====
-    LOG_LEVEL: str = "INFO"
-    LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    LOG_FILE: Optional[str] = None
-
-    # ===== WEBSOCKET & SOCKET.IO =====
-    WEBSOCKET_HEARTBEAT_INTERVAL: int = 30  # segundos
-    WEBSOCKET_TIMEOUT: int = 60  # segundos
-    MAX_WEBSOCKET_CONNECTIONS: int = 1000
-
-    # Socket.IO Settings (para python-socketio)
-    SOCKETIO_CORS_ORIGINS: str = "*"  # Configure para produção
-    SOCKETIO_PATH: str = "/socket.io"
-    SOCKETIO_LOGGER: bool = True
-    SOCKETIO_ENGINEIO_LOGGER: bool = True
-
-    # WebSocket Settings
-    WS_HEARTBEAT_INTERVAL: int = 30  # segundos
-    WS_CONNECTION_TIMEOUT: int = 300  # 5 minutos
-
-    # Lock Settings
-    LOCK_DEFAULT_TIMEOUT: int = 300  # 5 minutos
-    LOCK_CLEANUP_INTERVAL: int = 60  # 1 minuto
+    # ===== WEBSOCKET =====
+    WEBSOCKET_HEARTBEAT_INTERVAL = int(os.getenv("WEBSOCKET_HEARTBEAT_INTERVAL", "30"))
+    WEBSOCKET_TIMEOUT = int(os.getenv("WEBSOCKET_TIMEOUT", "60"))
+    WS_HEARTBEAT_INTERVAL = WEBSOCKET_HEARTBEAT_INTERVAL  # Alias para compatibilidade
+    WS_CONNECTION_TIMEOUT = int(os.getenv("WS_CONNECTION_TIMEOUT", "300"))
 
     # ===== UPLOADS =====
-    UPLOAD_DIR: str = "uploads"
-    MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
-    ALLOWED_IMAGE_EXTENSIONS: List[str] = [".jpg", ".jpeg", ".png", ".gif", ".webp"]
-    ALLOWED_DOCUMENT_EXTENSIONS: List[str] = [".pdf", ".txt", ".md"]
+    UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
+    MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", "10485760"))
 
-    # ===== CACHE =====
-    CACHE_TTL: int = 300  # 5 minutos
-    CACHE_ENABLED: bool = True
+    # ===== LOGGING =====
+    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
-    # ===== RATE LIMITING =====
-    RATE_LIMIT_ENABLED: bool = True
-    RATE_LIMIT_REQUESTS: int = 100
-    RATE_LIMIT_PERIOD: int = 60  # segundos
+    # ===== LOCKS =====
+    LOCK_TIMEOUT_SECONDS = int(os.getenv("LOCK_TIMEOUT_SECONDS", "300"))
+    LOCK_HEARTBEAT_INTERVAL = int(os.getenv("LOCK_HEARTBEAT_INTERVAL", "30"))
 
-    # ===== GAME SETTINGS =====
-    DEFAULT_CAMPAIGN_MAX_PLAYERS: int = 6
-    MAX_CHARACTER_LEVEL: int = 20
-    DEFAULT_HP_ON_LEVEL_UP: str = "average"  # "average", "roll", "max"
-
-    # ===== WEBSOCKET LOCKS =====
-    LOCK_TIMEOUT_SECONDS: int = 300  # 5 minutos
-    LOCK_HEARTBEAT_INTERVAL: int = 30  # 30 segundos
-
-    # ===== PERFORMANCE =====
-    DATABASE_QUERY_TIMEOUT: int = 30  # segundos
-    API_RESPONSE_TIMEOUT: int = 30  # segundos
-
-    @validator("ALLOWED_ORIGINS", pre=True)
-    def assemble_cors_origins(cls, v: Any) -> List[str]:
-        """Converte string separada por vírgula em lista - CORRIGIDO."""
-        # Se é None ou vazio, retorna lista vazia
-        if v is None or (isinstance(v, str) and not v.strip()):
-            return []
-
-        # Se já é uma lista, apenas limpa e retorna
-        if isinstance(v, list):
-            return [str(item).strip() for item in v if str(item).strip()]
-
-        # Se é string, processa
-        if isinstance(v, str):
-            # Se parece com uma lista JSON, tenta fazer parse
-            if v.strip().startswith('[') and v.strip().endswith(']'):
-                try:
-                    import ast
-                    parsed = ast.literal_eval(v)
-                    if isinstance(parsed, list):
-                        return [str(item).strip() for item in parsed if str(item).strip()]
-                except (ValueError, SyntaxError):
-                    pass
-
-            # Trata como string separada por vírgula
-            origins = [item.strip() for item in v.split(',') if item.strip()]
-            if origins:
-                return origins
-            # Se a string não produziu resultados válidos, retorna padrão
-            return ["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000"]
-
-        # Para qualquer outro tipo, tenta converter para string e processar
-        try:
-            str_value = str(v).strip()
-            if str_value and str_value.lower() != 'none':
-                origins = [item.strip() for item in str_value.split(',') if item.strip()]
-                if origins:
-                    return origins
-        except Exception:
-            pass
-
-        # Fallback seguro - retorna origens padrão para desenvolvimento
-        print(f"⚠️  Valor inválido para ALLOWED_ORIGINS: {v} (tipo: {type(v)}). Usando valores padrão.")
-        return ["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000"]
-
-    @validator("SECRET_KEY")
-    def validate_secret_key(cls, v: str) -> str:
-        """Valida que SECRET_KEY tem tamanho mínimo."""
-        if len(v) < 32:
-            # Se a SECRET_KEY é muito pequena, gerar uma nova automaticamente
-            new_key = secrets.token_urlsafe(32)
-            print(f"⚠️  SECRET_KEY muito pequena. Usando chave gerada automaticamente.")
-            print(f"🔐 Adicione esta linha ao seu arquivo .env:")
-            print(f"SECRET_KEY={new_key}")
-            return new_key
-        return v
-
-    @validator("MONGODB_URI")
-    def validate_mongodb_uri(cls, v: str) -> str:
-        """Valida formato básico da URI do MongoDB."""
-        if not v:
-            print("⚠️  MONGODB_URI não definida. Usando padrão local.")
-            return "mongodb://localhost:27017"
-
-        if not v.startswith("mongodb://") and not v.startswith("mongodb+srv://"):
-            print("⚠️  MONGODB_URI deve começar com mongodb:// ou mongodb+srv://")
-            return "mongodb://localhost:27017"
-        return v
-
-    @validator("ENVIRONMENT")
-    def validate_environment(cls, v: str) -> str:
-        """Valida ambiente."""
-        allowed = ["development", "staging", "production", "testing"]
-        if v.lower() not in allowed:
-            print(f"⚠️  ENVIRONMENT deve ser um de: {allowed}. Usando 'development'.")
-            return "development"
-        return v.lower()
-
-    @validator("LOG_LEVEL")
-    def validate_log_level(cls, v: str) -> str:
-        """Valida nível de log."""
-        allowed = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-        if v.upper() not in allowed:
-            print(f"⚠️  LOG_LEVEL deve ser um de: {allowed}. Usando 'INFO'.")
-            return "INFO"
-        return v.upper()
+    # ===== PROPRIEDADES ÚTEIS =====
+    @property
+    def is_development(self):
+        return self.ENVIRONMENT.lower() == "development"
 
     @property
-    def is_development(self) -> bool:
-        """Retorna True se está em ambiente de desenvolvimento."""
-        return self.ENVIRONMENT == "development"
+    def is_production(self):
+        return self.ENVIRONMENT.lower() == "production"
 
     @property
-    def is_production(self) -> bool:
-        """Retorna True se está em ambiente de produção."""
-        return self.ENVIRONMENT == "production"
-
-    @property
-    def is_testing(self) -> bool:
-        """Retorna True se está em ambiente de teste."""
-        return self.ENVIRONMENT == "testing"
-
-    def get_mongodb_settings(self) -> dict:
-        """Retorna configurações do MongoDB."""
-        return {
-            "minPoolSize": self.MONGODB_MIN_POOL_SIZE,
-            "maxPoolSize": self.MONGODB_MAX_POOL_SIZE,
-            "maxIdleTimeMS": self.MONGODB_MAX_IDLE_TIME_MS,
-            "serverSelectionTimeoutMS": 5000,
-            "socketTimeoutMS": 30000,
-            "connectTimeoutMS": 10000,
-        }
-
-    def get_upload_path(self, filename: str = "") -> str:
-        """Retorna caminho completo para uploads."""
-        upload_path = os.path.join(os.getcwd(), self.UPLOAD_DIR)
-        if filename:
-            return os.path.join(upload_path, filename)
-        return upload_path
-
-    def get_current_timestamp(self) -> str:
-        """Retorna timestamp atual em formato ISO."""
-        return datetime.utcnow().isoformat()
-
-    def is_allowed_file_extension(self, filename: str, file_type: str = "image") -> bool:
-        """Verifica se extensão do arquivo é permitida."""
-        ext = os.path.splitext(filename.lower())[1]
-
-        if file_type == "image":
-            return ext in self.ALLOWED_IMAGE_EXTENSIONS
-        elif file_type == "document":
-            return ext in self.ALLOWED_DOCUMENT_EXTENSIONS
-        else:
-            return ext in (self.ALLOWED_IMAGE_EXTENSIONS + self.ALLOWED_DOCUMENT_EXTENSIONS)
-
-    def get_socketio_settings(self) -> dict:
-        """Retorna configurações do Socket.IO."""
-        return {
-            "cors_allowed_origins": self.SOCKETIO_CORS_ORIGINS,
-            "logger": self.SOCKETIO_LOGGER,
-            "engineio_logger": self.SOCKETIO_ENGINEIO_LOGGER,
-        }
-
-    def get_cors_settings(self) -> dict:
-        """Retorna configurações de CORS."""
-        if self.is_production:
-            # Em produção, ser mais restritivo
-            return {
-                "allow_origins": self.ALLOWED_ORIGINS,
-                "allow_credentials": True,
-                "allow_methods": ["GET", "POST", "PUT", "DELETE", "PATCH"],
-                "allow_headers": ["*"],
-            }
-        else:
-            # Em desenvolvimento, ser mais permissivo
-            return {
-                "allow_origins": ["*"] if self.is_development else self.ALLOWED_ORIGINS,
-                "allow_credentials": True,
-                "allow_methods": ["*"],
-                "allow_headers": ["*"],
-            }
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
-        # Permitir campos extras sem erro
-        extra = "ignore"
+    def is_testing(self):
+        return self.ENVIRONMENT.lower() == "testing"
 
 
-# Função para criar .env se não existir
-def create_default_env():
-    """Cria arquivo .env padrão se não existir."""
-    env_path = ".env"
-
-    if not os.path.exists(env_path):
-        print("📝 Criando arquivo .env padrão...")
-
+# Criar .env se não existir
+def create_env_if_missing():
+    if not os.path.exists(".env"):
         secret_key = secrets.token_urlsafe(32)
-
-        env_content = f"""# ===== D&D VTT Backend Configuration =====
-# Arquivo .env gerado automaticamente
-
-# ===== APLICAÇÃO =====
+        env_content = f"""# D&D VTT Configuration
 APP_NAME=D&D Virtual Tabletop API
 ENVIRONMENT=development
 DEBUG=true
 
-# ===== SEGURANÇA (CRÍTICO) =====
 SECRET_KEY={secret_key}
-ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=1440
+REFRESH_TOKEN_EXPIRE_DAYS=30
 
-# ===== BANCO DE DADOS =====
 MONGODB_URI=mongodb://localhost:27017
 DB_NAME=dnd_vtt
 
-# ===== SERVIDOR =====
 HOST=0.0.0.0
 PORT=8000
 
-# ===== CORS =====
 ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000
 
-# ===== WEBSOCKET =====
-WEBSOCKET_HEARTBEAT_INTERVAL=30
-WEBSOCKET_TIMEOUT=60
-MAX_WEBSOCKET_CONNECTIONS=1000
-
-# ===== SOCKET.IO =====
 SOCKETIO_CORS_ORIGINS=*
-SOCKETIO_PATH=/socket.io
 SOCKETIO_LOGGER=true
 SOCKETIO_ENGINEIO_LOGGER=true
 
-# ===== LOCKS =====
+WEBSOCKET_HEARTBEAT_INTERVAL=30
+WEBSOCKET_TIMEOUT=60
+WS_CONNECTION_TIMEOUT=300
+
 LOCK_TIMEOUT_SECONDS=300
 LOCK_HEARTBEAT_INTERVAL=30
 
-# ===== UPLOADS =====
 UPLOAD_DIR=uploads
 MAX_FILE_SIZE=10485760
 
-# ===== LOGGING =====
 LOG_LEVEL=INFO
 """
-
-        with open(env_path, "w", encoding="utf-8") as f:
+        with open(".env", "w") as f:
             f.write(env_content)
-
-        print(f"✅ Arquivo .env criado com SUCCESS!")
-        print(f"🔐 SECRET_KEY gerada automaticamente: {secret_key[:16]}...")
-        print(f"📁 Localização: {os.path.abspath(env_path)}")
-
-        return True
-
-    return False
+        print("✅ Arquivo .env criado!")
 
 
-# Criar .env se necessário (executado na importação)
-try:
-    create_default_env()
-except Exception as e:
-    print(f"⚠️  Aviso ao criar .env: {e}")
+# Executar na importação
+create_env_if_missing()
 
-# Instância global das configurações
-try:
-    settings = Settings()
-    print(f"✅ Configurações carregadas com sucesso!")
-    print(f"🌍 Ambiente: {settings.ENVIRONMENT}")
-    print(f"🔐 SECRET_KEY: {'✓' if len(settings.SECRET_KEY) >= 32 else '✗'}")
-    print(f"🗄️  MongoDB: {settings.MONGODB_URI}")
-    print(f"🌐 ALLOWED_ORIGINS: {settings.ALLOWED_ORIGINS}")
-except Exception as e:
-    print(f"❌ Erro ao carregar configurações: {e}")
-    print("🔧 Verifique o arquivo .env ou execute o script generate_secret.py")
-    raise
+# Instância global
+settings = Settings()
 
-
-# Configurações específicas por ambiente
-def get_environment_settings():
-    """Retorna configurações específicas do ambiente."""
-    if settings.is_development:
-        return {
-            "reload": True,
-            "debug": True,
-            "log_level": "DEBUG"
-        }
-    elif settings.is_production:
-        return {
-            "reload": False,
-            "debug": False,
-            "log_level": "INFO"
-        }
-    elif settings.is_testing:
-        return {
-            "reload": False,
-            "debug": True,
-            "log_level": "DEBUG"
-        }
-    else:
-        return {
-            "reload": False,
-            "debug": False,
-            "log_level": "INFO"
-        }
-
-
-def get_logging_config():
-    """Retorna configuração de logging."""
-    return {
-        "version": 1,
-        "disable_existing_loggers": False,
-        "formatters": {
-            "default": {
-                "format": settings.LOG_FORMAT,
-            },
-        },
-        "handlers": {
-            "default": {
-                "formatter": "default",
-                "class": "logging.StreamHandler",
-                "stream": "ext://sys.stdout",
-            },
-        },
-        "root": {
-            "level": settings.LOG_LEVEL,
-            "handlers": ["default"],
-        },
-    }
+print(f"✅ Configuração simples carregada!")
+print(f"🌍 Ambiente: {settings.ENVIRONMENT}")
+print(f"🌐 CORS: {settings.ALLOWED_ORIGINS}")
+print(f"🗄️  MongoDB: {settings.MONGODB_URI}")

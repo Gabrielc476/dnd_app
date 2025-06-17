@@ -7,6 +7,7 @@ Problemas resolvidos:
 3. ✅ Validação de ObjectIds implementada
 4. ✅ Logging adequado adicionado
 5. ✅ Métodos de conversão de ID melhorados
+6. ✅ ValidationError removido (não existe no pymongo moderno)
 """
 
 import logging
@@ -14,7 +15,7 @@ from typing import Any, Dict, List, Optional, Union
 from motor.motor_asyncio import AsyncIOMotorDatabase, AsyncIOMotorCollection
 from bson import ObjectId
 from bson.errors import InvalidId
-from pymongo.errors import DuplicateKeyError, ValidationError
+from pymongo.errors import DuplicateKeyError, WriteError, OperationFailure
 
 from app.utils.id_handler import IdHandler
 
@@ -90,13 +91,23 @@ class SafeCollection:
             **kwargs: Argumentos nomeados
 
         Returns:
-            Cursor para os documentos
+            Cursor com resultados
         """
         try:
+            # Converter IDs no filtro
             safe_filter = self._prepare_filter(filter_doc)
+
             logger.debug(f"find em {self.name} com filtro: {safe_filter}")
 
-            return self._collection.find(safe_filter, *args, **kwargs)
+            cursor = self._collection.find(safe_filter, *args, **kwargs)
+
+            # Converter cursor para list com IDs normalizados
+            results = []
+            async for document in cursor:
+                results.append(IdHandler.normalize_id(document))
+
+            logger.debug(f"Encontrados {len(results)} documentos em {self.name}")
+            return results
 
         except Exception as e:
             logger.error(f"Erro em find na coleção {self.name}: {e}")
@@ -105,36 +116,33 @@ class SafeCollection:
     async def insert_one(
             self,
             document: Dict[str, Any],
-            *args,
             **kwargs
-    ):
+    ) -> str:
         """
         Insere um documento.
 
         Args:
             document: Documento a ser inserido
-            *args: Argumentos posicionais
-            **kwargs: Argumentos nomeados
+            **kwargs: Argumentos adicionais
 
         Returns:
-            Resultado da inserção
+            ID do documento inserido
         """
         try:
-            # Preparar documento para inserção
-            safe_doc = self._prepare_document(document)
+            # Preparar documento
+            safe_document = self._prepare_document(document)
 
             logger.debug(f"insert_one em {self.name}")
 
-            result = await self._collection.insert_one(safe_doc, *args, **kwargs)
+            result = await self._collection.insert_one(safe_document, **kwargs)
 
-            logger.info(f"Documento inserido em {self.name} com ID: {result.inserted_id}")
-            return result
+            document_id = str(result.inserted_id)
+            logger.debug(f"Documento inserido em {self.name} com ID: {document_id}")
+
+            return document_id
 
         except DuplicateKeyError as e:
-            logger.warning(f"Chave duplicada em {self.name}: {e}")
-            raise
-        except ValidationError as e:
-            logger.error(f"Erro de validação em {self.name}: {e}")
+            logger.warning(f"Documento duplicado em {self.name}: {e}")
             raise
         except Exception as e:
             logger.error(f"Erro em insert_one na coleção {self.name}: {e}")
@@ -143,34 +151,30 @@ class SafeCollection:
     async def insert_many(
             self,
             documents: List[Dict[str, Any]],
-            *args,
             **kwargs
-    ):
+    ) -> List[str]:
         """
         Insere múltiplos documentos.
 
         Args:
-            documents: Lista de documentos a serem inseridos
-            *args: Argumentos posicionais
-            **kwargs: Argumentos nomeados
+            documents: Lista de documentos
+            **kwargs: Argumentos adicionais
 
         Returns:
-            Resultado da inserção
+            Lista de IDs dos documentos inseridos
         """
         try:
-            if not documents:
-                logger.warning(f"Lista vazia de documentos para insert_many em {self.name}")
-                return await self._collection.insert_many([], *args, **kwargs)
+            # Preparar documentos
+            safe_documents = [self._prepare_document(doc) for doc in documents]
 
-            # Preparar todos os documentos
-            safe_docs = [self._prepare_document(doc) for doc in documents]
+            logger.debug(f"insert_many em {self.name} - {len(safe_documents)} documentos")
 
-            logger.debug(f"insert_many em {self.name} com {len(safe_docs)} documentos")
+            result = await self._collection.insert_many(safe_documents, **kwargs)
 
-            result = await self._collection.insert_many(safe_docs, *args, **kwargs)
+            document_ids = [str(doc_id) for doc_id in result.inserted_ids]
+            logger.debug(f"Documentos inseridos em {self.name}: {len(document_ids)}")
 
-            logger.info(f"{len(result.inserted_ids)} documentos inseridos em {self.name}")
-            return result
+            return document_ids
 
         except Exception as e:
             logger.error(f"Erro em insert_many na coleção {self.name}: {e}")
@@ -180,31 +184,32 @@ class SafeCollection:
             self,
             filter_doc: Dict[str, Any],
             update_doc: Dict[str, Any],
-            *args,
             **kwargs
-    ):
+    ) -> bool:
         """
         Atualiza um documento.
 
         Args:
             filter_doc: Filtro para encontrar o documento
-            update_doc: Dados da atualização
-            *args: Argumentos posicionais
-            **kwargs: Argumentos nomeados
+            update_doc: Operações de atualização
+            **kwargs: Argumentos adicionais
 
         Returns:
-            Resultado da atualização
+            True se um documento foi modificado
         """
         try:
+            # Converter IDs no filtro
             safe_filter = self._prepare_filter(filter_doc)
             safe_update = self._prepare_update(update_doc)
 
             logger.debug(f"update_one em {self.name}")
 
-            result = await self._collection.update_one(safe_filter, safe_update, *args, **kwargs)
+            result = await self._collection.update_one(safe_filter, safe_update, **kwargs)
 
-            logger.debug(f"Documentos modificados em {self.name}: {result.modified_count}")
-            return result
+            modified = result.modified_count > 0
+            logger.debug(f"Documento {'modificado' if modified else 'não modificado'} em {self.name}")
+
+            return modified
 
         except Exception as e:
             logger.error(f"Erro em update_one na coleção {self.name}: {e}")
@@ -214,31 +219,32 @@ class SafeCollection:
             self,
             filter_doc: Dict[str, Any],
             update_doc: Dict[str, Any],
-            *args,
             **kwargs
-    ):
+    ) -> int:
         """
         Atualiza múltiplos documentos.
 
         Args:
-            filter_doc: Filtro para encontrar os documentos
-            update_doc: Dados da atualização
-            *args: Argumentos posicionais
-            **kwargs: Argumentos nomeados
+            filter_doc: Filtro para encontrar documentos
+            update_doc: Operações de atualização
+            **kwargs: Argumentos adicionais
 
         Returns:
-            Resultado da atualização
+            Número de documentos modificados
         """
         try:
+            # Converter IDs no filtro
             safe_filter = self._prepare_filter(filter_doc)
             safe_update = self._prepare_update(update_doc)
 
             logger.debug(f"update_many em {self.name}")
 
-            result = await self._collection.update_many(safe_filter, safe_update, *args, **kwargs)
+            result = await self._collection.update_many(safe_filter, safe_update, **kwargs)
 
-            logger.info(f"{result.modified_count} documentos modificados em {self.name}")
-            return result
+            modified_count = result.modified_count
+            logger.debug(f"{modified_count} documentos modificados em {self.name}")
+
+            return modified_count
 
         except Exception as e:
             logger.error(f"Erro em update_many na coleção {self.name}: {e}")
@@ -247,29 +253,30 @@ class SafeCollection:
     async def delete_one(
             self,
             filter_doc: Dict[str, Any],
-            *args,
             **kwargs
-    ):
+    ) -> bool:
         """
-        Deleta um documento.
+        Remove um documento.
 
         Args:
             filter_doc: Filtro para encontrar o documento
-            *args: Argumentos posicionais
-            **kwargs: Argumentos nomeados
+            **kwargs: Argumentos adicionais
 
         Returns:
-            Resultado da deleção
+            True se um documento foi removido
         """
         try:
+            # Converter IDs no filtro
             safe_filter = self._prepare_filter(filter_doc)
 
             logger.debug(f"delete_one em {self.name}")
 
-            result = await self._collection.delete_one(safe_filter, *args, **kwargs)
+            result = await self._collection.delete_one(safe_filter, **kwargs)
 
-            logger.info(f"{result.deleted_count} documento deletado em {self.name}")
-            return result
+            deleted = result.deleted_count > 0
+            logger.debug(f"Documento {'removido' if deleted else 'não encontrado'} em {self.name}")
+
+            return deleted
 
         except Exception as e:
             logger.error(f"Erro em delete_one na coleção {self.name}: {e}")
@@ -278,29 +285,30 @@ class SafeCollection:
     async def delete_many(
             self,
             filter_doc: Dict[str, Any],
-            *args,
             **kwargs
-    ):
+    ) -> int:
         """
-        Deleta múltiplos documentos.
+        Remove múltiplos documentos.
 
         Args:
-            filter_doc: Filtro para encontrar os documentos
-            *args: Argumentos posicionais
-            **kwargs: Argumentos nomeados
+            filter_doc: Filtro para encontrar documentos
+            **kwargs: Argumentos adicionais
 
         Returns:
-            Resultado da deleção
+            Número de documentos removidos
         """
         try:
+            # Converter IDs no filtro
             safe_filter = self._prepare_filter(filter_doc)
 
             logger.debug(f"delete_many em {self.name}")
 
-            result = await self._collection.delete_many(safe_filter, *args, **kwargs)
+            result = await self._collection.delete_many(safe_filter, **kwargs)
 
-            logger.info(f"{result.deleted_count} documentos deletados em {self.name}")
-            return result
+            deleted_count = result.deleted_count
+            logger.debug(f"{deleted_count} documentos removidos em {self.name}")
+
+            return deleted_count
 
         except Exception as e:
             logger.error(f"Erro em delete_many na coleção {self.name}: {e}")
@@ -308,52 +316,62 @@ class SafeCollection:
 
     async def count_documents(
             self,
-            filter_doc: Dict[str, Any],
-            *args,
+            filter_doc: Dict[str, Any] = None,
             **kwargs
     ) -> int:
         """
-        Conta documentos que correspondem ao filtro.
+        Conta documentos na coleção.
 
         Args:
-            filter_doc: Filtro de busca
-            *args: Argumentos posicionais
-            **kwargs: Argumentos nomeados
+            filter_doc: Filtro opcional
+            **kwargs: Argumentos adicionais
 
         Returns:
             Número de documentos
         """
         try:
+            if filter_doc is None:
+                filter_doc = {}
+
+            # Converter IDs no filtro
             safe_filter = self._prepare_filter(filter_doc)
 
-            count = await self._collection.count_documents(safe_filter, *args, **kwargs)
+            count = await self._collection.count_documents(safe_filter, **kwargs)
 
-            logger.debug(f"count_documents em {self.name}: {count}")
+            logger.debug(f"Contados {count} documentos em {self.name}")
             return count
 
         except Exception as e:
             logger.error(f"Erro em count_documents na coleção {self.name}: {e}")
             raise
 
-    async def aggregate(self, pipeline: List[Dict[str, Any]], *args, **kwargs):
+    async def aggregate(
+            self,
+            pipeline: List[Dict[str, Any]],
+            **kwargs
+    ) -> List[Dict[str, Any]]:
         """
         Executa pipeline de agregação.
 
         Args:
             pipeline: Pipeline de agregação
-            *args: Argumentos posicionais
-            **kwargs: Argumentos nomeados
+            **kwargs: Argumentos adicionais
 
         Returns:
-            Cursor de agregação
+            Lista de resultados
         """
         try:
-            # Preparar pipeline (converter IDs em estágios $match, etc.)
-            safe_pipeline = self._prepare_pipeline(pipeline)
+            logger.debug(f"aggregate em {self.name} - {len(pipeline)} estágios")
 
-            logger.debug(f"aggregate em {self.name} com {len(safe_pipeline)} estágios")
+            cursor = self._collection.aggregate(pipeline, **kwargs)
 
-            return self._collection.aggregate(safe_pipeline, *args, **kwargs)
+            # Converter cursor para list com IDs normalizados
+            results = []
+            async for document in cursor:
+                results.append(IdHandler.normalize_id(document))
+
+            logger.debug(f"Agregação retornou {len(results)} resultados em {self.name}")
+            return results
 
         except Exception as e:
             logger.error(f"Erro em aggregate na coleção {self.name}: {e}")
@@ -361,7 +379,7 @@ class SafeCollection:
 
     def _prepare_filter(self, filter_doc: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Prepara filtro convertendo IDs para ObjectId.
+        Prepara um filtro convertendo IDs para ObjectId.
 
         Args:
             filter_doc: Filtro original
@@ -370,130 +388,39 @@ class SafeCollection:
             Filtro com IDs convertidos
         """
         if not filter_doc:
-            return filter_doc
+            return {}
 
-        prepared = filter_doc.copy()
-
-        # Converter _id se presente
-        if "_id" in prepared:
-            id_value = prepared["_id"]
-
-            # Se é um ObjectId, manter como está
-            if isinstance(id_value, ObjectId):
-                pass
-            # Se é uma string, tentar converter
-            elif isinstance(id_value, str):
-                object_id = IdHandler.to_object_id(id_value)
-                if object_id:
-                    prepared["_id"] = object_id
-            # Se é um dict (ex: {"$in": [...]})
-            elif isinstance(id_value, dict):
-                prepared["_id"] = self._convert_id_operators(id_value)
-
-        # Converter outros campos que podem conter IDs
-        for key in ["owner_id", "campaign_id", "dm_id", "character_id", "user_id"]:
-            if key in prepared:
-                converted_id = IdHandler.to_object_id(prepared[key])
-                if converted_id:
-                    prepared[key] = converted_id
-
-        return prepared
+        return IdHandler.prepare_filter(filter_doc)
 
     def _prepare_document(self, document: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Prepara documento para inserção.
+        Prepara um documento convertendo IDs para ObjectId.
 
         Args:
             document: Documento original
 
         Returns:
-            Documento preparado
+            Documento com IDs convertidos
         """
         if not document:
-            return document
+            return {}
 
-        prepared = document.copy()
-
-        # Converter campos de ID
-        for key in ["owner_id", "campaign_id", "dm_id", "character_id", "user_id"]:
-            if key in prepared and prepared[key]:
-                converted_id = IdHandler.to_object_id(prepared[key])
-                if converted_id:
-                    prepared[key] = converted_id
-
-        return prepared
+        return IdHandler.prepare_document(document)
 
     def _prepare_update(self, update_doc: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Prepara documento de atualização.
+        Prepara um update convertendo IDs para ObjectId.
 
         Args:
-            update_doc: Documento de atualização
+            update_doc: Update original
 
         Returns:
-            Documento preparado
+            Update com IDs convertidos
         """
         if not update_doc:
-            return update_doc
+            return {}
 
-        prepared = {}
-
-        for operator, data in update_doc.items():
-            if isinstance(data, dict):
-                prepared[operator] = self._prepare_document(data)
-            else:
-                prepared[operator] = data
-
-        return prepared
-
-    def _prepare_pipeline(self, pipeline: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Prepara pipeline de agregação.
-
-        Args:
-            pipeline: Pipeline original
-
-        Returns:
-            Pipeline preparado
-        """
-        prepared = []
-
-        for stage in pipeline:
-            prepared_stage = {}
-
-            for operation, data in stage.items():
-                if operation == "$match" and isinstance(data, dict):
-                    prepared_stage[operation] = self._prepare_filter(data)
-                else:
-                    prepared_stage[operation] = data
-
-            prepared.append(prepared_stage)
-
-        return prepared
-
-    def _convert_id_operators(self, id_value: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Converte operadores que contêm IDs.
-
-        Args:
-            id_value: Valor com operadores
-
-        Returns:
-            Valor com IDs convertidos
-        """
-        converted = {}
-
-        for operator, value in id_value.items():
-            if operator in ["$in", "$nin"] and isinstance(value, list):
-                converted[operator] = [
-                    IdHandler.to_object_id(item) or item for item in value
-                ]
-            elif operator in ["$eq", "$ne"]:
-                converted[operator] = IdHandler.to_object_id(value) or value
-            else:
-                converted[operator] = value
-
-        return converted
+        return IdHandler.prepare_update(update_doc)
 
 
 class DatabaseManager:
@@ -501,36 +428,29 @@ class DatabaseManager:
     Gerenciador principal do banco de dados.
     """
 
-    def __init__(self):
-        self._db: Optional[AsyncIOMotorDatabase] = None
-        self._collections: Dict[str, SafeCollection] = {}
-
-    def set_database(self, database: AsyncIOMotorDatabase):
+    def __init__(self, database: AsyncIOMotorDatabase):
         """
-        Define a instância do banco de dados.
+        Inicializa o gerenciador.
 
         Args:
             database: Instância do banco MongoDB
         """
-        self._db = database
+        self.db = database
         self._collections = {}
-        logger.info("Database configurado no DatabaseManager")
 
     def get_collection(self, name: str) -> SafeCollection:
         """
-        Obtém uma coleção segura.
+        Obtém uma coleção segura por nome.
 
         Args:
             name: Nome da coleção
 
         Returns:
-            SafeCollection wrapper
+            Wrapper SafeCollection
         """
-        if not self._db:
-            raise RuntimeError("Database não foi configurado")
-
         if name not in self._collections:
-            self._collections[name] = SafeCollection(self._db[name])
+            collection = self.db[name]
+            self._collections[name] = SafeCollection(collection)
 
         return self._collections[name]
 
@@ -540,14 +460,14 @@ class DatabaseManager:
         return self.get_collection("users")
 
     @property
-    def campaigns(self) -> SafeCollection:
-        """Coleção de campanhas."""
-        return self.get_collection("campaigns")
-
-    @property
     def characters(self) -> SafeCollection:
         """Coleção de personagens."""
         return self.get_collection("characters")
+
+    @property
+    def campaigns(self) -> SafeCollection:
+        """Coleção de campanhas."""
+        return self.get_collection("campaigns")
 
     @property
     def npcs(self) -> SafeCollection:
@@ -560,42 +480,122 @@ class DatabaseManager:
         return self.get_collection("combats")
 
     @property
-    def locks(self) -> SafeCollection:
-        """Coleção de locks."""
-        return self.get_collection("locks")
+    def spells(self) -> SafeCollection:
+        """Coleção de magias."""
+        return self.get_collection("spells")
 
     @property
-    def images(self) -> SafeCollection:
-        """Coleção de imagens."""
-        return self.get_collection("images")
+    def items(self) -> SafeCollection:
+        """Coleção de itens."""
+        return self.get_collection("items")
 
     @property
-    def compendium_spells(self) -> SafeCollection:
-        """Coleção de magias do compêndio."""
-        return self.get_collection("compendium_spells")
+    def monsters(self) -> SafeCollection:
+        """Coleção de monstros."""
+        return self.get_collection("monsters")
 
-    @property
-    def compendium_items(self) -> SafeCollection:
-        """Coleção de itens do compêndio."""
-        return self.get_collection("compendium_items")
+    async def ping(self) -> bool:
+        """
+        Testa conexão com o banco.
 
-    @property
-    def compendium_monsters(self) -> SafeCollection:
-        """Coleção de monstros do compêndio."""
-        return self.get_collection("compendium_monsters")
+        Returns:
+            True se conectado
+        """
+        try:
+            await self.db.command("ping")
+            return True
+        except Exception as e:
+            logger.error(f"Erro ao fazer ping no banco: {e}")
+            return False
+
+    async def create_indexes(self):
+        """Cria índices necessários nas coleções."""
+        try:
+            # Índices para usuários
+            await self.users._collection.create_index("email", unique=True)
+            await self.users._collection.create_index("username", unique=True)
+
+            # Índices para personagens
+            await self.characters._collection.create_index("owner_id")
+            await self.characters._collection.create_index("campaign_id")
+
+            # Índices para campanhas
+            await self.campaigns._collection.create_index("dm_id")
+            await self.campaigns._collection.create_index("players")
+
+            # Índices para NPCs
+            await self.npcs._collection.create_index("campaign_id")
+            await self.npcs._collection.create_index("creator_id")
+
+            # Índices para combates
+            await self.combats._collection.create_index("campaign_id")
+            await self.combats._collection.create_index("dm_id")
+
+            logger.info("✅ Índices do banco criados com sucesso")
+
+        except Exception as e:
+            logger.error(f"Erro ao criar índices: {e}")
+            raise
 
 
-# Instância global do gerenciador
-db = DatabaseManager()
+# Instância global do database manager
+db_manager: Optional[DatabaseManager] = None
 
 
-async def get_database() -> AsyncIOMotorDatabase:
+async def connect_to_mongo(mongodb_uri: str, db_name: str) -> DatabaseManager:
     """
-    Dependency para obter a instância do banco de dados.
+    Conecta ao MongoDB e retorna o gerenciador.
+
+    Args:
+        mongodb_uri: URI de conexão do MongoDB
+        db_name: Nome do banco de dados
 
     Returns:
-        Instância do banco de dados
+        Instância do DatabaseManager
     """
-    if not db._db:
-        raise RuntimeError("Database não foi configurado")
-    return db._db
+    global db_manager
+
+    try:
+        from motor.motor_asyncio import AsyncIOMotorClient
+
+        client = AsyncIOMotorClient(mongodb_uri)
+        database = client[db_name]
+
+        db_manager = DatabaseManager(database)
+
+        # Testar conexão
+        if await db_manager.ping():
+            logger.info(f"✅ Conectado ao MongoDB: {db_name}")
+            await db_manager.create_indexes()
+            return db_manager
+        else:
+            raise Exception("Falha no ping do MongoDB")
+
+    except Exception as e:
+        logger.error(f"❌ Erro ao conectar ao MongoDB: {e}")
+        raise
+
+
+async def close_mongo_connection():
+    """Fecha a conexão com o MongoDB."""
+    global db_manager
+    if db_manager:
+        # Motor/AsyncIOMotorClient fecha automaticamente
+        logger.info("✅ Conexão com MongoDB fechada")
+        db_manager = None
+
+
+def get_database() -> DatabaseManager:
+    """
+    Dependency para obter instância do banco.
+
+    Returns:
+        Instância do DatabaseManager
+
+    Raises:
+        Exception: Se não estiver conectado
+    """
+    global db_manager
+    if db_manager is None:
+        raise Exception("Banco de dados não conectado")
+    return db_manager
