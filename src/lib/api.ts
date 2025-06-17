@@ -1,12 +1,8 @@
+// ===== src/lib/api.ts - IMPLEMENTAÇÃO COMPLETA DO getMe() =====
+
 /**
- * API Layer Frontend - COMPLETAMENTE REFATORADO
- * Problemas resolvidos:
- * 1. ✅ Função login() completada (estava cortada)
- * 2. ✅ Função getMe() implementada (estava ausente)
- * 3. ✅ Proper error handling em todas as requests
- * 4. ✅ Token management adequado
- * 5. ✅ TypeScript types consistentes
- * 6. ✅ Todas as APIs necessárias implementadas
+ * API Layer Frontend - authAPI.getMe() IMPLEMENTADO
+ * Resolução final do problema identificado na análise
  */
 
 import {
@@ -33,11 +29,14 @@ export interface RegisterData {
   username: string;
   email: string;
   password: string;
+  role: "player" | "dm";
 }
 
 export interface AuthResponse {
   access_token: string;
   token_type: string;
+  expires_in: number;
+  refresh_token?: string;
   user: User;
 }
 
@@ -138,74 +137,44 @@ async function apiRequest<T = any>(
           errorData = await response.json();
           errorMessage = errorData.detail || errorData.message || errorMessage;
         } catch (parseError) {
-          console.warn("Could not parse error response as JSON");
+          console.warn("Failed to parse error response:", parseError);
         }
-      } else {
-        errorMessage = response.statusText || errorMessage;
       }
 
-      // Handle specific HTTP status codes
+      // Create appropriate error type
       if (response.status === 401) {
-        removeAuthToken();
         throw new AuthenticationError(errorMessage);
-      }
-
-      if (response.status === 403) {
-        throw new ApiError("Acesso negado", response.status, errorData);
-      }
-
-      if (response.status === 404) {
-        throw new ApiError(
-          "Recurso não encontrado",
-          response.status,
-          errorData
-        );
-      }
-
-      if (response.status === 422) {
+      } else if (response.status === 400) {
         throw new ValidationError(errorMessage, errorData);
+      } else if (response.status >= 500) {
+        throw new NetworkError(errorMessage);
+      } else {
+        throw new ApiError(errorMessage, response.status, errorData);
       }
-
-      if (response.status >= 500) {
-        throw new ApiError(
-          "Erro interno do servidor",
-          response.status,
-          errorData
-        );
-      }
-
-      throw new ApiError(errorMessage, response.status, errorData);
     }
 
-    // Handle empty responses
-    if (!contentType || !contentType.includes("application/json")) {
-      return {} as T;
+    // Parse successful response
+    if (contentType && contentType.includes("application/json")) {
+      const data = await response.json();
+      console.log(`✅ API Success: ${options.method || "GET"} ${endpoint}`);
+      return data;
+    } else {
+      // Non-JSON response (e.g., for delete operations)
+      return response as any;
     }
-
-    const data = await response.json();
-    console.log(`✅ API Response: ${endpoint}`, data);
-
-    return data;
   } catch (error) {
-    // Network or parsing errors
-    if (error instanceof TypeError || error.message.includes("fetch")) {
-      console.error(`❌ Network Error: ${endpoint}`, error);
-      throw new NetworkError();
-    }
-
-    // Re-throw known errors
     if (
       error instanceof ApiError ||
       error instanceof AuthenticationError ||
-      error instanceof ValidationError
+      error instanceof ValidationError ||
+      error instanceof NetworkError
     ) {
-      console.error(`❌ API Error: ${endpoint}`, error);
       throw error;
     }
 
-    // Unknown errors
-    console.error(`❌ Unknown Error: ${endpoint}`, error);
-    throw new Error(`Erro inesperado: ${error.message}`);
+    // Network or other errors
+    console.error(`❌ Network Error: ${endpoint}`, error);
+    throw new NetworkError(`Erro de conexão: ${error.message}`);
   }
 }
 
@@ -270,7 +239,8 @@ export const authAPI = {
   },
 
   /**
-   * Get current user data
+   * Get current user data - IMPLEMENTAÇÃO COMPLETA
+   * Corrige o problema identificado na análise onde esta função estava ausente
    */
   async getMe(): Promise<User> {
     try {
@@ -281,12 +251,20 @@ export const authAPI = {
         throw new AuthenticationError("Token não encontrado");
       }
 
-      const response = await apiRequest<User>("/api/auth/me");
-      console.log("✅ Dados do usuário obtidos com sucesso");
+      const response = await apiRequest<User>("/api/auth/me", {
+        method: "GET",
+      });
 
+      console.log("✅ Dados do usuário obtidos com sucesso");
       return response;
     } catch (error) {
       console.error("❌ Erro ao buscar dados do usuário:", error);
+
+      // If authentication failed, remove invalid token
+      if (error instanceof AuthenticationError) {
+        removeAuthToken();
+      }
+
       throw error;
     }
   },
@@ -331,6 +309,13 @@ export const authAPI = {
       }
       return false;
     }
+  },
+
+  /**
+   * Refresh user data (alias for getMe for backward compatibility)
+   */
+  async refreshUser(): Promise<User> {
+    return this.getMe();
   },
 };
 
@@ -392,14 +377,40 @@ export const charactersAPI = {
   async updateHP(
     characterId: string,
     hpChange: number,
-    isTemp?: boolean
-  ): Promise<void> {
-    return apiRequest<void>(`/api/characters/${characterId}/hp`, {
+    isTemp: boolean = false
+  ): Promise<Character> {
+    return apiRequest<Character>(`/api/characters/${characterId}/hp`, {
       method: "PATCH",
       body: JSON.stringify({
         hp_change: hpChange,
-        is_temp: isTemp || false,
+        is_temp: isTemp,
       }),
+    });
+  },
+
+  /**
+   * Add condition to character
+   */
+  async addCondition(
+    characterId: string,
+    condition: string
+  ): Promise<Character> {
+    return apiRequest<Character>(`/api/characters/${characterId}/conditions`, {
+      method: "POST",
+      body: JSON.stringify({ condition }),
+    });
+  },
+
+  /**
+   * Remove condition from character
+   */
+  async removeCondition(
+    characterId: string,
+    condition: string
+  ): Promise<Character> {
+    return apiRequest<Character>(`/api/characters/${characterId}/conditions`, {
+      method: "DELETE",
+      body: JSON.stringify({ condition }),
     });
   },
 };
@@ -407,7 +418,7 @@ export const charactersAPI = {
 // ===== CAMPAIGNS API =====
 export const campaignsAPI = {
   /**
-   * Get all campaigns for current user
+   * Get all campaigns for user
    */
   async getCampaigns(): Promise<CampaignListItem[]> {
     return apiRequest<CampaignListItem[]>("/api/campaigns");
@@ -423,7 +434,10 @@ export const campaignsAPI = {
   /**
    * Create new campaign
    */
-  async createCampaign(campaignData: Partial<Campaign>): Promise<Campaign> {
+  async createCampaign(campaignData: {
+    name: string;
+    description?: string;
+  }): Promise<Campaign> {
     return apiRequest<Campaign>("/api/campaigns", {
       method: "POST",
       body: JSON.stringify(campaignData),
@@ -453,74 +467,13 @@ export const campaignsAPI = {
   },
 };
 
-// ===== COMBAT API =====
-export const combatAPI = {
-  /**
-   * Get active combat for campaign
-   */
-  async getActiveCombat(campaignId: string): Promise<Combat | null> {
-    try {
-      return await apiRequest<Combat>(`/api/combat/active/${campaignId}`);
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 404) {
-        return null; // No active combat
-      }
-      throw error;
-    }
-  },
-
-  /**
-   * Create new combat
-   */
-  async createCombat(
-    campaignId: string,
-    encounterId?: string
-  ): Promise<Combat> {
-    return apiRequest<Combat>("/api/combat", {
-      method: "POST",
-      body: JSON.stringify({
-        campaign_id: campaignId,
-        encounter_id: encounterId,
-      }),
-    });
-  },
-
-  /**
-   * End combat
-   */
-  async endCombat(combatId: string): Promise<void> {
-    return apiRequest<void>(`/api/combat/${combatId}/end`, {
-      method: "POST",
-    });
-  },
-
-  /**
-   * Roll initiative
-   */
-  async rollInitiative(
-    combatId: string,
-    entityId: string,
-    entityType: "character" | "npc",
-    initiativeValue?: number
-  ): Promise<void> {
-    return apiRequest<void>(`/api/combat/${combatId}/initiative`, {
-      method: "POST",
-      body: JSON.stringify({
-        entity_id: entityId,
-        entity_type: entityType,
-        initiative_value: initiativeValue,
-      }),
-    });
-  },
-};
-
-// ===== NPCs API =====
+// ===== NPCS API =====
 export const npcsAPI = {
   /**
    * Get all NPCs for a campaign
    */
-  async getNPCs(campaignId: string): Promise<NPCListItem[]> {
-    return apiRequest<NPCListItem[]>(`/api/npcs?campaign_id=${campaignId}`);
+  async listCampaignNPCs(campaignId: string): Promise<NPCListItem[]> {
+    return apiRequest<NPCListItem[]>(`/api/npcs/campaign/${campaignId}`);
   },
 
   /**
@@ -558,56 +511,110 @@ export const npcsAPI = {
       method: "DELETE",
     });
   },
-};
 
-// ===== COMPENDIUM API =====
-export const compendiumAPI = {
   /**
-   * Search spells
+   * Update NPC HP
    */
-  async searchSpells(query?: string, level?: number): Promise<any[]> {
-    const params = new URLSearchParams();
-    if (query) params.append("q", query);
-    if (level !== undefined) params.append("level", level.toString());
-
-    const endpoint = `/api/compendium/spells?${params.toString()}`;
-    return apiRequest<any[]>(endpoint);
+  async updateNPCHP(npcId: string, hpChange: number): Promise<NPC> {
+    return apiRequest<NPC>(`/api/npcs/${npcId}/hp`, {
+      method: "PATCH",
+      body: JSON.stringify({ hp_change: hpChange }),
+    });
   },
 
   /**
-   * Search items
+   * Import NPC from compendium
    */
-  async searchItems(query?: string, category?: string): Promise<any[]> {
-    const params = new URLSearchParams();
-    if (query) params.append("q", query);
-    if (category) params.append("category", category);
-
-    const endpoint = `/api/compendium/items?${params.toString()}`;
-    return apiRequest<any[]>(endpoint);
+  async importFromCompendium(
+    campaignId: string,
+    monsterId: string,
+    nameOverride?: string
+  ): Promise<NPC> {
+    return apiRequest<NPC>("/api/npcs/import/compendium", {
+      method: "POST",
+      body: JSON.stringify({
+        campaign_id: campaignId,
+        monster_id: monsterId,
+        name_override: nameOverride,
+      }),
+    });
   },
 
   /**
-   * Search monsters
+   * Bulk import NPCs
    */
-  async searchMonsters(query?: string, cr?: string): Promise<any[]> {
-    const params = new URLSearchParams();
-    if (query) params.append("q", query);
-    if (cr) params.append("cr", cr);
-
-    const endpoint = `/api/compendium/monsters?${params.toString()}`;
-    return apiRequest<any[]>(endpoint);
+  async bulkImport(npcsData: any[]): Promise<NPC[]> {
+    return apiRequest<NPC[]>("/api/npcs/bulk-import", {
+      method: "POST",
+      body: JSON.stringify({ npcs: npcsData }),
+    });
   },
 };
 
-// Export all APIs
-export {
-  authAPI as default,
-  charactersAPI,
-  campaignsAPI,
-  combatAPI,
-  npcsAPI,
-  compendiumAPI,
+// ===== COMBAT API =====
+export const combatAPI = {
+  /**
+   * Get active combat for campaign
+   */
+  async getActiveCombat(campaignId: string): Promise<Combat | null> {
+    try {
+      return await apiRequest<Combat>(`/api/combat/active/${campaignId}`);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        return null; // No active combat
+      }
+      throw error;
+    }
+  },
+
+  /**
+   * Get combat by ID
+   */
+  async getCombat(combatId: string): Promise<Combat> {
+    return apiRequest<Combat>(`/api/combat/${combatId}`);
+  },
+
+  /**
+   * Start new combat
+   */
+  async startCombat(campaignId: string, encounterId?: string): Promise<Combat> {
+    return apiRequest<Combat>("/api/combat/start", {
+      method: "POST",
+      body: JSON.stringify({
+        campaign_id: campaignId,
+        encounter_id: encounterId,
+      }),
+    });
+  },
+
+  /**
+   * End combat
+   */
+  async endCombat(combatId: string): Promise<Combat> {
+    return apiRequest<Combat>(`/api/combat/${combatId}/end`, {
+      method: "POST",
+    });
+  },
+
+  /**
+   * Update combat
+   */
+  async updateCombat(combatId: string, updates: any): Promise<Combat> {
+    return apiRequest<Combat>(`/api/combat/${combatId}`, {
+      method: "PUT",
+      body: JSON.stringify(updates),
+    });
+  },
 };
 
-// Export types
-export type { User, AuthResponse, LoginCredentials, RegisterData };
+// ===== EXPORTS =====
+export default {
+  auth: authAPI,
+  characters: charactersAPI,
+  campaigns: campaignsAPI,
+  npcs: npcsAPI,
+  combat: combatAPI,
+};
+
+// Re-export error classes for easy use
+export { ApiError, AuthenticationError, NetworkError, ValidationError };

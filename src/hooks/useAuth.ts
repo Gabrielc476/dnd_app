@@ -1,13 +1,8 @@
+// ===== src/hooks/useAuth.ts - HOOK ATUALIZADO PARA USAR getMe() =====
+
 /**
- * useAuth Hook - COMPLETAMENTE REFATORADO
- * Problemas resolvidos:
- * 1. ✅ Função getMe() agora está implementada na API
- * 2. ✅ Proper error handling
- * 3. ✅ Loading states adequados
- * 4. ✅ Token validation
- * 5. ✅ Automatic logout on invalid token
- * 6. ✅ Context pattern correto
- * 7. ✅ TypeScript types completos
+ * useAuth Hook - ATUALIZADO COM getMe() FUNCIONANDO
+ * Integração completa com a API implementada
  */
 
 "use client";
@@ -39,8 +34,8 @@ interface AuthState {
 }
 
 interface AuthContextType extends AuthState {
-  login: (credentials: LoginCredentials) => Promise<void>;
-  register: (userData: RegisterData) => Promise<void>;
+  login: (credentials: LoginCredentials) => Promise<boolean>;
+  register: (userData: RegisterData) => Promise<boolean>;
   logout: () => Promise<void>;
   validateToken: () => Promise<void>;
   clearError: () => void;
@@ -52,8 +47,8 @@ export interface UseAuthReturn {
   isLoading: boolean;
   error: string | null;
   isAuthenticated: boolean;
-  login: (credentials: LoginCredentials) => Promise<void>;
-  register: (userData: RegisterData) => Promise<void>;
+  login: (credentials: LoginCredentials) => Promise<boolean>;
+  register: (userData: RegisterData) => Promise<boolean>;
   logout: () => Promise<void>;
   validateToken: () => Promise<void>;
   clearError: () => void;
@@ -87,15 +82,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
     updateState({ error: null });
   }, [updateState]);
 
-  // Refresh user data
+  // Refresh user data using getMe()
   const refreshUser = useCallback(async () => {
     try {
+      console.log("🔄 Atualizando dados do usuário...");
+
+      // ✅ USANDO A FUNÇÃO getMe() IMPLEMENTADA
       const userData = await authAPI.getMe();
+
       updateState({
         user: userData,
         isAuthenticated: true,
         error: null,
       });
+
+      console.log("✅ Dados do usuário atualizados:", userData.username);
     } catch (error) {
       console.error("❌ Erro ao atualizar dados do usuário:", error);
 
@@ -105,14 +106,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
           isAuthenticated: false,
           error: null, // Don't show error for token expiration
         });
+      } else {
+        updateState({
+          error: error instanceof Error ? error.message : "Erro desconhecido",
+        });
       }
     }
   }, [updateState]);
 
-  // Validate token
+  // Validate token using getMe()
   const validateToken = useCallback(async () => {
     try {
       updateState({ isLoading: true });
+
+      // ✅ USANDO validateToken QUE USA getMe() INTERNAMENTE
       const isValid = await authAPI.validateToken();
 
       if (isValid) {
@@ -153,6 +160,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       try {
         console.log("🔍 Validando token existente...");
+
+        // ✅ USANDO getMe() PARA VALIDAR E OBTER DADOS DO USUÁRIO
         const userData = await authAPI.getMe();
 
         updateState({
@@ -183,7 +192,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // Login function
   const login = useCallback(
-    async (credentials: LoginCredentials) => {
+    async (credentials: LoginCredentials): Promise<boolean> => {
       try {
         updateState({ isLoading: true, error: null });
         console.log("🔐 Tentando fazer login...");
@@ -198,9 +207,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         });
 
         console.log("✅ Login realizado com sucesso:", response.user.username);
-
-        // Redirect to dashboard after successful login
-        router.push("/dashboard");
+        return true;
       } catch (error) {
         console.error("❌ Erro no login:", error);
 
@@ -221,15 +228,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
           error: errorMessage,
         });
 
-        throw error;
+        return false;
       }
     },
-    [updateState, router]
+    [updateState]
   );
 
   // Register function
   const register = useCallback(
-    async (userData: RegisterData) => {
+    async (userData: RegisterData): Promise<boolean> => {
       try {
         updateState({ isLoading: true, error: null });
         console.log("📝 Tentando registrar usuário...");
@@ -247,9 +254,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           "✅ Registro realizado com sucesso:",
           response.user.username
         );
-
-        // Redirect to dashboard after successful registration
-        router.push("/dashboard");
+        return true;
       } catch (error) {
         console.error("❌ Erro no registro:", error);
 
@@ -268,10 +273,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
           error: errorMessage,
         });
 
-        throw error;
+        return false;
       }
     },
-    [updateState, router]
+    [updateState]
   );
 
   // Logout function
@@ -291,8 +296,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       console.log("✅ Logout realizado com sucesso");
 
-      // Redirect to login page
-      router.push("/auth/login");
+      // Redirect to home page
+      router.push("/");
     } catch (error) {
       console.error("❌ Erro no logout:", error);
 
@@ -304,7 +309,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         error: null,
       });
 
-      router.push("/auth/login");
+      router.push("/");
     }
   }, [updateState, router]);
 
@@ -355,9 +360,10 @@ export function useAuthStandalone(): UseAuthReturn {
     updateState({ error: null });
   }, [updateState]);
 
-  // Refresh user data
+  // Refresh user data using getMe()
   const refreshUser = useCallback(async () => {
     try {
+      // ✅ USANDO A FUNÇÃO getMe() IMPLEMENTADA
       const userData = await authAPI.getMe();
       updateState({
         user: userData,
@@ -377,10 +383,12 @@ export function useAuthStandalone(): UseAuthReturn {
     }
   }, [updateState]);
 
-  // Validate token
+  // Validate token using getMe()
   const validateToken = useCallback(async () => {
     try {
       updateState({ isLoading: true });
+
+      // ✅ USANDO validateToken QUE USA getMe() INTERNAMENTE
       const isValid = await authAPI.validateToken();
 
       if (isValid) {
@@ -394,6 +402,7 @@ export function useAuthStandalone(): UseAuthReturn {
         });
       }
     } catch (error) {
+      console.error("❌ Erro na validação do token:", error);
       updateState({
         user: null,
         isAuthenticated: false,
@@ -405,12 +414,54 @@ export function useAuthStandalone(): UseAuthReturn {
 
   // Initialize auth on mount
   useEffect(() => {
-    validateToken();
-  }, [validateToken]);
+    const initializeAuth = async () => {
+      const token = localStorage.getItem("authToken");
+
+      if (!token) {
+        updateState({
+          isLoading: false,
+          isAuthenticated: false,
+          user: null,
+          error: null,
+        });
+        return;
+      }
+
+      try {
+        console.log("🔍 Validando token existente...");
+
+        // ✅ USANDO getMe() PARA VALIDAR E OBTER DADOS DO USUÁRIO
+        const userData = await authAPI.getMe();
+
+        updateState({
+          user: userData,
+          isLoading: false,
+          isAuthenticated: true,
+          error: null,
+        });
+
+        console.log("✅ Token válido, usuário autenticado:", userData.username);
+      } catch (error) {
+        console.error("❌ Token inválido:", error);
+
+        // Remove invalid token
+        localStorage.removeItem("authToken");
+
+        updateState({
+          user: null,
+          isLoading: false,
+          isAuthenticated: false,
+          error: null,
+        });
+      }
+    };
+
+    initializeAuth();
+  }, [updateState, refreshUser]);
 
   // Login function
   const login = useCallback(
-    async (credentials: LoginCredentials) => {
+    async (credentials: LoginCredentials): Promise<boolean> => {
       try {
         updateState({ isLoading: true, error: null });
         const response = await authAPI.login(credentials);
@@ -422,7 +473,7 @@ export function useAuthStandalone(): UseAuthReturn {
           error: null,
         });
 
-        router.push("/dashboard");
+        return true;
       } catch (error) {
         let errorMessage = "Erro ao fazer login";
 
@@ -441,15 +492,15 @@ export function useAuthStandalone(): UseAuthReturn {
           error: errorMessage,
         });
 
-        throw error;
+        return false;
       }
     },
-    [updateState, router]
+    [updateState]
   );
 
   // Register function
   const register = useCallback(
-    async (userData: RegisterData) => {
+    async (userData: RegisterData): Promise<boolean> => {
       try {
         updateState({ isLoading: true, error: null });
         const response = await authAPI.register(userData);
@@ -461,7 +512,7 @@ export function useAuthStandalone(): UseAuthReturn {
           error: null,
         });
 
-        router.push("/dashboard");
+        return true;
       } catch (error) {
         let errorMessage = "Erro ao criar conta";
 
@@ -478,10 +529,10 @@ export function useAuthStandalone(): UseAuthReturn {
           error: errorMessage,
         });
 
-        throw error;
+        return false;
       }
     },
-    [updateState, router]
+    [updateState]
   );
 
   // Logout function
@@ -497,7 +548,7 @@ export function useAuthStandalone(): UseAuthReturn {
         error: null,
       });
 
-      router.push("/auth/login");
+      router.push("/");
     } catch (error) {
       updateState({
         user: null,
@@ -506,7 +557,7 @@ export function useAuthStandalone(): UseAuthReturn {
         error: null,
       });
 
-      router.push("/auth/login");
+      router.push("/");
     }
   }, [updateState, router]);
 
