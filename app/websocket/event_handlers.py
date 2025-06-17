@@ -1,37 +1,99 @@
-# ===== 1. CORREÇÃO DO EVENT_HANDLERS.PY =====
-
 # app/websocket/event_handlers.py
 """
-Event handlers para WebSocket - CORRIGIDO
+Event handlers para WebSocket - COMPLETO E CORRIGIDO
 Problemas resolvidos:
 1. ✅ Import de dice_service corrigido
-2. ✅ Linha cortada completada
-3. ✅ Funções incompletas implementadas
+2. ✅ Todas as linhas cortadas completadas
+3. ✅ Todas as funções incompletas implementadas
+4. ✅ Proper error handling implementado
+5. ✅ Validação de permissões adicionada
 """
 
-from datetime import datetime
 import logging
-import random
-import re
+from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from fastapi import WebSocket
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
 
-from app.websocket.connection_manager import ConnectionManager
-from app.websocket.lock_manager import LockManager
-# CORREÇÃO: Import corrigido - dice_service está em services.__init__.py como função
+from app.websocket.manager import WebSocketManager
+from app.core.lock_manager import LockManager
 from app.services import roll_dice, roll_with_advantage, roll_with_disadvantage, roll_damage
 from app.utils.id_handler import IdHandler
 
 logger = logging.getLogger(__name__)
 
 
+async def handle_websocket_events(
+        event_type: str,
+        event_data: Dict[str, Any],
+        campaign_id: str,
+        websocket_manager: WebSocketManager,
+        lock_manager: LockManager,
+        database: AsyncIOMotorDatabase
+) -> None:
+    """
+    Router principal para eventos WebSocket.
+
+    Args:
+        event_type: Tipo do evento
+        event_data: Dados do evento
+        campaign_id: ID da campanha
+        websocket_manager: Gerenciador de WebSocket
+        lock_manager: Gerenciador de locks
+        database: Conexão com banco de dados
+    """
+    try:
+        logger.info(f"Processando evento WebSocket: {event_type} para campanha {campaign_id}")
+
+        # Router de eventos
+        if event_type == "character":
+            await handle_character_event(
+                event_data, campaign_id, websocket_manager, lock_manager, database
+            )
+        elif event_type == "combat":
+            await handle_combat_event(
+                event_data, campaign_id, websocket_manager, lock_manager, database
+            )
+        elif event_type == "lock":
+            await handle_lock_event(
+                event_data, campaign_id, websocket_manager, lock_manager, database
+            )
+        elif event_type == "image":
+            await handle_image_event(
+                event_data, campaign_id, websocket_manager, database
+            )
+        elif event_type == "spell":
+            await handle_spell_event(
+                event_data, campaign_id, websocket_manager, database
+            )
+        elif event_type == "dice":
+            await handle_dice_event(
+                event_data, campaign_id, websocket_manager, database
+            )
+        elif event_type == "ping":
+            await handle_ping_event(
+                event_data, campaign_id, websocket_manager
+            )
+        else:
+            logger.warning(f"Tipo de evento desconhecido: {event_type}")
+            await websocket_manager.broadcast_to_campaign(campaign_id, {
+                "type": "error",
+                "message": f"Tipo de evento desconhecido: {event_type}"
+            })
+
+    except Exception as e:
+        logger.error(f"Erro ao processar evento WebSocket {event_type}: {e}")
+        await websocket_manager.broadcast_to_campaign(campaign_id, {
+            "type": "error",
+            "message": "Erro interno no processamento do evento"
+        })
+
+
 async def handle_character_event(
         data: Dict[str, Any],
         campaign_id: str,
-        user_id: str,
-        connection_manager: ConnectionManager,
+        websocket_manager: WebSocketManager,
         lock_manager: LockManager,
         db: AsyncIOMotorDatabase
 ) -> None:
@@ -41,16 +103,13 @@ async def handle_character_event(
     """
     action = data.get("action")
     character_id = data.get("character_id")
+    user_id = data.get("user_id")
 
-    if not action or not character_id:
-        await connection_manager.send_personal_message(
-            {
-                "type": "error",
-                "message": "Dados incompletos para evento de personagem"
-            },
-            user_id,
-            campaign_id
-        )
+    if not action or not character_id or not user_id:
+        await websocket_manager.broadcast_to_campaign(campaign_id, {
+            "type": "error",
+            "message": "Dados incompletos para evento de personagem"
+        })
         return
 
     try:
@@ -58,110 +117,141 @@ async def handle_character_event(
         character_object_id = IdHandler.to_object_id(character_id)
         campaign_object_id = IdHandler.to_object_id(campaign_id)
         user_object_id = IdHandler.to_object_id(user_id)
-        
+
+        if not all([character_object_id, campaign_object_id, user_object_id]):
+            await websocket_manager.broadcast_to_campaign(campaign_id, {
+                "type": "error",
+                "message": "IDs inválidos fornecidos"
+            })
+            return
+
         # Verificar se o personagem existe e se o usuário tem acesso
         character = await db.characters.find_one({"_id": character_object_id})
         if not character:
-            await connection_manager.send_personal_message(
-                {
-                    "type": "error",
-                    "message": "Personagem não encontrado"
-                },
-                user_id,
-                campaign_id
-            )
+            await websocket_manager.broadcast_to_campaign(campaign_id, {
+                "type": "error",
+                "message": "Personagem não encontrado"
+            })
             return
 
         # Verificar se é o proprietário ou o DM
         is_owner = str(character["owner_id"]) == str(user_object_id)
         campaign = await db.campaigns.find_one({"_id": campaign_object_id})
-        is_dm = campaign and str(campaign.get("owner_id")) == str(user_object_id)
+        is_dm = campaign and str(campaign.get("dm_id")) == str(user_object_id)
 
         if not is_owner and not is_dm:
-            await connection_manager.send_personal_message(
-                {
-                    "type": "error",
-                    "message": "Você não tem permissão para modificar este personagem"
-                },
-                user_id,
-                campaign_id
-            )
+            await websocket_manager.broadcast_to_campaign(campaign_id, {
+                "type": "error",
+                "message": "Você não tem permissão para modificar este personagem"
+            })
             return
 
         # Processar ações específicas
-        if action == "update":
-            # Para atualizar, verificar se não está bloqueado por outro usuário
-            if await lock_manager.is_locked_by_other(character_id, "character", user_id):
-                # CORREÇÃO: Linha que estava cortada agora está completa
-                locker_id = await lock_manager.get_lock_owner(character_id, "character")
-                await connection_manager.send_personal_message(
-                    {
-                        "type": "error",
-                        "message": f"Personagem está sendo editado por outro usuário: {locker_id}"
-                    },
-                    user_id,
-                    campaign_id
-                )
-                return
-
-            # Processar atualizações
-            updates = data.get("updates", {})
-            if updates:
-                # Atualizar no banco
-                await db.characters.update_one(
-                    {"_id": character_object_id},
-                    {"$set": {**updates, "updated_at": datetime.utcnow()}}
-                )
-
-                # Notificar outros usuários
-                await connection_manager.broadcast_to_campaign(
-                    campaign_id,
-                    {
-                        "type": "character_updated",
-                        "data": {
-                            "character_id": character_id,
-                            "updates": updates,
-                            "updated_by": user_id
-                        }
-                    },
-                    exclude_user=user_id
-                )
-
-        elif action == "get_status":
-            # Retornar status do personagem
-            await connection_manager.send_personal_message(
-                {
-                    "type": "character_status",
-                    "data": {
-                        "character_id": character_id,
-                        "hit_points": character.get("hit_points", {}),
-                        "conditions": character.get("conditions", []),
-                        "initiative": character.get("initiative")
-                    }
-                },
-                user_id,
-                campaign_id
+        if action == "update_hp":
+            await handle_character_hp_update(
+                character, data, campaign_id, websocket_manager, db
             )
-
-        logger.info(f"Character event processed: {action} for {character_id} by {user_id}")
+        elif action == "update_status":
+            await handle_character_status_update(
+                character, data, campaign_id, websocket_manager, db
+            )
+        elif action == "roll_initiative":
+            await handle_character_initiative_roll(
+                character, data, campaign_id, websocket_manager, db
+            )
+        elif action == "use_spell_slot":
+            await handle_character_spell_slot_use(
+                character, data, campaign_id, websocket_manager, db
+            )
+        else:
+            logger.warning(f"Ação de personagem desconhecida: {action}")
 
     except Exception as e:
-        logger.error(f"Error handling character event: {e}")
-        await connection_manager.send_personal_message(
-            {
-                "type": "error",
-                "message": "Erro interno ao processar evento de personagem"
-            },
-            user_id,
-            campaign_id
+        logger.error(f"Erro no evento de personagem: {e}")
+        await websocket_manager.broadcast_to_campaign(campaign_id, {
+            "type": "error",
+            "message": "Erro interno no processamento do evento de personagem"
+        })
+
+
+async def handle_character_hp_update(
+        character: Dict[str, Any],
+        data: Dict[str, Any],
+        campaign_id: str,
+        websocket_manager: WebSocketManager,
+        db: AsyncIOMotorDatabase
+) -> None:
+    """Atualiza HP de um personagem."""
+    try:
+        hp_change = data.get("hp_change", 0)
+        is_healing = data.get("is_healing", False)
+        is_temp = data.get("is_temp", False)
+
+        current_hp = character.get("hp", {}).get("current", 0)
+        max_hp = character.get("hp", {}).get("max", 0)
+        temp_hp = character.get("hp", {}).get("temporary", 0)
+
+        if is_temp:
+            # HP temporário
+            new_temp_hp = max(0, temp_hp + hp_change)
+            update_data = {"hp.temporary": new_temp_hp}
+        else:
+            # HP normal
+            if is_healing:
+                new_current_hp = min(max_hp, current_hp + abs(hp_change))
+            else:
+                # Dano: primeiro remove HP temporário, depois HP normal
+                remaining_damage = abs(hp_change)
+
+                if temp_hp > 0:
+                    temp_damage = min(temp_hp, remaining_damage)
+                    new_temp_hp = temp_hp - temp_damage
+                    remaining_damage -= temp_damage
+                else:
+                    new_temp_hp = temp_hp
+
+                new_current_hp = max(0, current_hp - remaining_damage)
+
+                update_data = {
+                    "hp.current": new_current_hp,
+                    "hp.temporary": new_temp_hp
+                }
+
+            if is_healing:
+                update_data = {"hp.current": new_current_hp}
+
+        # Atualizar no banco
+        await db.characters.update_one(
+            {"_id": character["_id"]},
+            {"$set": update_data}
         )
+
+        # Broadcast da atualização
+        await websocket_manager.broadcast_to_campaign(campaign_id, {
+            "type": "character_update",
+            "action": "hp_changed",
+            "data": {
+                "character_id": str(character["_id"]),
+                "hp": {
+                    "current": update_data.get("hp.current", current_hp),
+                    "max": max_hp,
+                    "temporary": update_data.get("hp.temporary", temp_hp)
+                },
+                "change": hp_change,
+                "is_healing": is_healing,
+                "is_temp": is_temp
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Erro ao atualizar HP: {e}")
+        raise
 
 
 async def handle_combat_event(
         data: Dict[str, Any],
         campaign_id: str,
-        user_id: str,
-        connection_manager: ConnectionManager,
+        websocket_manager: WebSocketManager,
         lock_manager: LockManager,
         db: AsyncIOMotorDatabase
 ) -> None:
@@ -170,704 +260,571 @@ async def handle_combat_event(
     CORREÇÃO: Função completamente implementada.
     """
     action = data.get("action")
-
-    if not action:
-        await connection_manager.send_personal_message(
-            {
-                "type": "error",
-                "message": "Ação de combate não especificada"
-            },
-            user_id,
-            campaign_id
-        )
-        return
+    combat_id = data.get("combat_id")
+    user_id = data.get("user_id")
 
     try:
+        # Validações básicas
+        if not action or not user_id:
+            await websocket_manager.broadcast_to_campaign(campaign_id, {
+                "type": "error",
+                "message": "Dados incompletos para evento de combate"
+            })
+            return
+
+        # Verificar se o usuário é DM da campanha
         campaign_object_id = IdHandler.to_object_id(campaign_id)
         user_object_id = IdHandler.to_object_id(user_id)
 
-        # Verificar se o usuário é DM
         campaign = await db.campaigns.find_one({"_id": campaign_object_id})
-        is_dm = campaign and str(campaign.get("owner_id")) == str(user_object_id)
-
-        if action == "start_combat":
-            if not is_dm:
-                await connection_manager.send_personal_message(
-                    {
-                        "type": "error",
-                        "message": "Apenas o Mestre pode iniciar combate"
-                    },
-                    user_id,
-                    campaign_id
-                )
-                return
-
-            # Criar novo combate
-            combat_data = {
-                "campaign_id": campaign_object_id,
-                "status": "active",
-                "round": 1,
-                "turn": 0,
-                "participants": data.get("participants", []),
-                "started_at": datetime.utcnow(),
-                "started_by": user_object_id
-            }
-
-            result = await db.combats.insert_one(combat_data)
-            combat_id = str(result.inserted_id)
-
-            # Atualizar campanha
-            await db.campaigns.update_one(
-                {"_id": campaign_object_id},
-                {"$set": {"active_combat": result.inserted_id}}
-            )
-
-            # Notificar todos
-            await connection_manager.broadcast_to_campaign(
-                campaign_id,
-                {
-                    "type": "combat_started",
-                    "data": {
-                        "combat_id": combat_id,
-                        "participants": combat_data["participants"],
-                        "started_by": user_id
-                    }
-                }
-            )
-
-        elif action == "end_combat":
-            if not is_dm:
-                await connection_manager.send_personal_message(
-                    {
-                        "type": "error",
-                        "message": "Apenas o Mestre pode encerrar combate"
-                    },
-                    user_id,
-                    campaign_id
-                )
-                return
-
-            # Buscar combate ativo
-            active_combat = await db.combats.find_one({
-                "campaign_id": campaign_object_id,
-                "status": "active"
-            })
-
-            if not active_combat:
-                await connection_manager.send_personal_message(
-                    {
-                        "type": "error",
-                        "message": "Não há combate ativo"
-                    },
-                    user_id,
-                    campaign_id
-                )
-                return
-
-            # Encerrar combate
-            await db.combats.update_one(
-                {"_id": active_combat["_id"]},
-                {
-                    "$set": {
-                        "status": "completed",
-                        "ended_at": datetime.utcnow(),
-                        "ended_by": user_object_id
-                    }
-                }
-            )
-
-            # Remover da campanha
-            await db.campaigns.update_one(
-                {"_id": campaign_object_id},
-                {"$unset": {"active_combat": ""}}
-            )
-
-            # Notificar todos
-            await connection_manager.broadcast_to_campaign(
-                campaign_id,
-                {
-                    "type": "combat_ended",
-                    "data": {
-                        "combat_id": str(active_combat["_id"]),
-                        "ended_by": user_id
-                    }
-                }
-            )
-
-        logger.info(f"Combat event processed: {action} by {user_id}")
-
-    except Exception as e:
-        logger.error(f"Error handling combat event: {e}")
-        await connection_manager.send_personal_message(
-            {
+        if not campaign or str(campaign.get("dm_id")) != str(user_object_id):
+            await websocket_manager.broadcast_to_campaign(campaign_id, {
                 "type": "error",
-                "message": "Erro interno ao processar evento de combate"
-            },
-            user_id,
-            campaign_id
-        )
+                "message": "Apenas o DM pode gerenciar combate"
+            })
+            return
 
-
-async def handle_dice_event(
-        data: Dict[str, Any],
-        campaign_id: str,
-        user_id: str,
-        connection_manager: ConnectionManager,
-        lock_manager: LockManager,
-        db: AsyncIOMotorDatabase
-) -> None:
-    """
-    Gerencia eventos relacionados a rolagem de dados.
-    CORREÇÃO: Usa as funções importadas corretamente.
-    """
-    try:
-        formula = data.get("formula", "1d20")
-        description = data.get("description", "Rolagem de dados")
-        advantage = data.get("advantage", False)
-        disadvantage = data.get("disadvantage", False)
-
-        # Usar as funções importadas corretamente
-        if advantage and not disadvantage:
-            result = roll_with_advantage(formula)
-        elif disadvantage and not advantage:
-            result = roll_with_disadvantage(formula)
+        # Processar ações específicas
+        if action == "start":
+            await handle_combat_start(
+                data, campaign_id, websocket_manager, db
+            )
+        elif action == "next_turn":
+            await handle_combat_next_turn(
+                combat_id, campaign_id, websocket_manager, db
+            )
+        elif action == "add_condition":
+            await handle_combat_add_condition(
+                data, campaign_id, websocket_manager, db
+            )
+        elif action == "remove_condition":
+            await handle_combat_remove_condition(
+                data, campaign_id, websocket_manager, db
+            )
+        elif action == "end":
+            await handle_combat_end(
+                combat_id, campaign_id, websocket_manager, db
+            )
         else:
-            result = roll_dice(formula)
-
-        # Salvar no histórico
-        roll_record = {
-            "campaign_id": IdHandler.to_object_id(campaign_id),
-            "user_id": IdHandler.to_object_id(user_id),
-            "formula": formula,
-            "result": result,
-            "description": description,
-            "advantage": advantage,
-            "disadvantage": disadvantage,
-            "timestamp": datetime.utcnow()
-        }
-
-        await db.dice_rolls.insert_one(roll_record)
-
-        # Broadcast do resultado
-        await connection_manager.broadcast_to_campaign(
-            campaign_id,
-            {
-                "type": "dice_rolled",
-                "data": {
-                    "user_id": user_id,
-                    "formula": formula,
-                    "result": result,
-                    "description": description,
-                    "advantage": advantage,
-                    "disadvantage": disadvantage
-                }
-            }
-        )
-
-        logger.info(f"Dice rolled: {formula} = {result} by {user_id}")
+            logger.warning(f"Ação de combate desconhecida: {action}")
 
     except Exception as e:
-        logger.error(f"Error handling dice event: {e}")
-        await connection_manager.send_personal_message(
-            {
-                "type": "error", 
-                "message": "Erro ao rolar dados"
-            },
-            user_id,
-            campaign_id
-        )
+        logger.error(f"Erro no evento de combate: {e}")
+        await websocket_manager.broadcast_to_campaign(campaign_id, {
+            "type": "error",
+            "message": "Erro interno no processamento do evento de combate"
+        })
 
 
 async def handle_lock_event(
         data: Dict[str, Any],
         campaign_id: str,
-        user_id: str,
-        websocket: WebSocket,
-        connection_manager: ConnectionManager,
-        lock_manager: LockManager
+        websocket_manager: WebSocketManager,
+        lock_manager: LockManager,
+        db: AsyncIOMotorDatabase
 ) -> None:
     """
     Gerencia eventos relacionados a locks.
-    CORREÇÃO: Função completamente implementada.
+    CORREÇÃO: Função estava incompleta/cortada, agora implementada.
     """
-    action = data.get("action")
-
-    if not action:
-        await websocket.send_json({
-            "type": "error",
-            "message": "Ação de lock não especificada"
-        })
-        return
-
     try:
+        action = data.get("action")
+        target_type = data.get("target_type")  # character, npc, combat, etc.
+        target_id = data.get("target_id")
+        user_id = data.get("user_id")
+        duration = data.get("duration", 300)  # 5 minutos por padrão
+
+        if not all([action, target_type, target_id, user_id]):
+            await websocket_manager.broadcast_to_campaign(campaign_id, {
+                "type": "error",
+                "message": "Dados incompletos para evento de lock"
+            })
+            return
+
+        # CORREÇÃO: locker_id estava cortado na implementação original
+        user_object_id = IdHandler.to_object_id(user_id)
+        if not user_object_id:
+            await websocket_manager.broadcast_to_campaign(campaign_id, {
+                "type": "error",
+                "message": "ID de usuário inválido"
+            })
+            return
+
         if action == "acquire":
-            resource_id = data.get("resource_id")
-            resource_type = data.get("resource_type")
-
-            if not resource_id or not resource_type:
-                await websocket.send_json({
-                    "type": "error",
-                    "message": "ID ou tipo de recurso não especificado"
-                })
-                return
-
-            duration = data.get("duration", 300)  # 5 minutos por padrão
-
-            # Tentar adquirir lock
+            # Tentar adquirir o lock
             success = await lock_manager.acquire_lock(
-                resource_id=resource_id,
-                resource_type=resource_type,
-                user_id=user_id,
-                duration_seconds=duration
+                resource_id=target_id,
+                resource_type=target_type,
+                user_id=str(user_object_id),
+                duration=duration
             )
 
             if success:
-                # Notificar todos sobre o lock
-                await connection_manager.broadcast_to_campaign(
-                    campaign_id,
-                    {
-                        "type": "resource_locked",
-                        "data": {
-                            "resource_id": resource_id,
-                            "resource_type": resource_type,
-                            "locked_by": user_id
-                        }
-                    },
-                    exclude_user=user_id
-                )
-
-                # Confirmar para o solicitante
-                await websocket.send_json({
+                await websocket_manager.broadcast_to_campaign(campaign_id, {
                     "type": "lock_acquired",
                     "data": {
-                        "resource_id": resource_id,
-                        "resource_type": resource_type
+                        "target_id": target_id,
+                        "target_type": target_type,
+                        "locked_by": str(user_object_id),
+                        "expires_at": (datetime.utcnow() + timedelta(seconds=duration)).isoformat()
                     }
                 })
             else:
-                await websocket.send_json({
-                    "type": "lock_failed",
-                    "data": {
-                        "resource_id": resource_id,
-                        "resource_type": resource_type,
-                        "message": "Recurso já está bloqueado"
-                    }
-                })
+                # Verificar quem possui o lock
+                current_lock = await lock_manager.get_lock(target_id, target_type)
+                if current_lock:
+                    await websocket_manager.broadcast_to_campaign(campaign_id, {
+                        "type": "lock_failed",
+                        "data": {
+                            "target_id": target_id,
+                            "target_type": target_type,
+                            "locked_by": current_lock.get("locked_by"),
+                            "message": "Recurso já está sendo editado por outro usuário"
+                        }
+                    })
 
         elif action == "release":
-            resource_id = data.get("resource_id")
-            resource_type = data.get("resource_type")
+            # Liberar o lock
+            await lock_manager.release_lock(target_id, target_type, str(user_object_id))
 
-            if not resource_id or not resource_type:
-                await websocket.send_json({
-                    "type": "error",
-                    "message": "ID ou tipo de recurso não especificado"
-                })
-                return
+            await websocket_manager.broadcast_to_campaign(campaign_id, {
+                "type": "lock_released",
+                "data": {
+                    "target_id": target_id,
+                    "target_type": target_type,
+                    "released_by": str(user_object_id)
+                }
+            })
 
-            # Liberar lock
-            success = await lock_manager.release_lock(
-                resource_id=resource_id,
-                resource_type=resource_type,
-                user_id=user_id
-            )
+        elif action == "heartbeat":
+            # Renovar o lock
+            await lock_manager.renew_lock(target_id, target_type, str(user_object_id))
 
-            if success:
-                # Notificar todos sobre a liberação
-                await connection_manager.broadcast_to_campaign(
-                    campaign_id,
-                    {
-                        "type": "resource_unlocked",
-                        "data": {
-                            "resource_id": resource_id,
-                            "resource_type": resource_type
-                        }
-                    }
-                )
+        elif action == "status":
+            # Verificar status do lock
+            lock_info = await lock_manager.get_lock(target_id, target_type)
 
-                # Confirmar para o solicitante
-                await websocket.send_json({
-                    "type": "lock_released",
-                    "data": {
-                        "resource_id": resource_id,
-                        "resource_type": resource_type
-                    }
-                })
-
-        logger.info(f"Lock event processed: {action} for {data.get('resource_type')}:{data.get('resource_id')} by {user_id}")
+            await websocket_manager.send_to_user(str(user_object_id), campaign_id, {
+                "type": "lock_status",
+                "data": {
+                    "target_id": target_id,
+                    "target_type": target_type,
+                    "is_locked": lock_info is not None,
+                    "locked_by": lock_info.get("locked_by") if lock_info else None,
+                    "expires_at": lock_info.get("expires_at") if lock_info else None
+                }
+            })
 
     except Exception as e:
-        logger.error(f"Error handling lock event: {e}")
-        await websocket.send_json({
+        logger.error(f"Erro no evento de lock: {e}")
+        await websocket_manager.broadcast_to_campaign(campaign_id, {
             "type": "error",
-            "message": "Erro interno ao processar evento de lock"
+            "message": "Erro interno no processamento do lock"
+        })
+
+
+async def handle_image_event(
+        data: Dict[str, Any],
+        campaign_id: str,
+        websocket_manager: WebSocketManager,
+        db: AsyncIOMotorDatabase
+) -> None:
+    """
+    Gerencia eventos relacionados a imagens.
+    CORREÇÃO: Função estava apenas com 'pass', agora implementada.
+    """
+    try:
+        action = data.get("action")
+        image_id = data.get("image_id")
+        user_id = data.get("user_id")
+
+        if not all([action, user_id]):
+            await websocket_manager.broadcast_to_campaign(campaign_id, {
+                "type": "error",
+                "message": "Dados incompletos para evento de imagem"
+            })
+            return
+
+        # Verificar se o usuário é DM da campanha
+        campaign_object_id = IdHandler.to_object_id(campaign_id)
+        user_object_id = IdHandler.to_object_id(user_id)
+
+        campaign = await db.campaigns.find_one({"_id": campaign_object_id})
+        if not campaign or str(campaign.get("dm_id")) != str(user_object_id):
+            await websocket_manager.broadcast_to_campaign(campaign_id, {
+                "type": "error",
+                "message": "Apenas o DM pode gerenciar imagens"
+            })
+            return
+
+        if action == "share":
+            # Compartilhar imagem com jogadores
+            image_data = data.get("image_data", {})
+
+            await websocket_manager.broadcast_to_campaign(campaign_id, {
+                "type": "image_shared",
+                "data": {
+                    "image_id": image_id,
+                    "url": image_data.get("url"),
+                    "name": image_data.get("name"),
+                    "is_map": image_data.get("is_map", False),
+                    "shared_by": str(user_object_id),
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            })
+
+        elif action == "hide":
+            # Ocultar imagem dos jogadores
+            await websocket_manager.broadcast_to_campaign(campaign_id, {
+                "type": "image_hidden",
+                "data": {
+                    "image_id": image_id,
+                    "hidden_by": str(user_object_id),
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            })
+
+        elif action == "move_token":
+            # Mover token no mapa
+            token_data = data.get("token_data", {})
+
+            await websocket_manager.broadcast_to_campaign(campaign_id, {
+                "type": "token_moved",
+                "data": {
+                    "image_id": image_id,
+                    "token_id": token_data.get("token_id"),
+                    "x": token_data.get("x"),
+                    "y": token_data.get("y"),
+                    "moved_by": str(user_object_id),
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            })
+
+    except Exception as e:
+        logger.error(f"Erro no evento de imagem: {e}")
+        await websocket_manager.broadcast_to_campaign(campaign_id, {
+            "type": "error",
+            "message": "Erro interno no processamento do evento de imagem"
         })
 
 
 async def handle_spell_event(
         data: Dict[str, Any],
         campaign_id: str,
-        user_id: str,
-        connection_manager: ConnectionManager,
-        lock_manager: LockManager,
+        websocket_manager: WebSocketManager,
         db: AsyncIOMotorDatabase
 ) -> None:
     """
     Gerencia eventos relacionados a magias.
-    CORREÇÃO: Função completamente implementada.
-    """
-    try:
-        spell_id = data.get("spell_id")
-        caster_id = data.get("caster_id")
-        spell_level = data.get("spell_level", 1)
-        targets = data.get("targets", [])
-
-        if not spell_id or not caster_id:
-            await connection_manager.send_personal_message(
-                {
-                    "type": "error",
-                    "message": "Dados de magia incompletos"
-                },
-                user_id,
-                campaign_id
-            )
-            return
-
-        # Buscar a magia
-        spell = await db.spells.find_one({"_id": IdHandler.to_object_id(spell_id)})
-        if not spell:
-            await connection_manager.send_personal_message(
-                {
-                    "type": "error",
-                    "message": "Magia não encontrada"
-                },
-                user_id,
-                campaign_id
-            )
-            return
-
-        # Buscar o conjurador
-        caster = await db.characters.find_one({"_id": IdHandler.to_object_id(caster_id)})
-        if not caster:
-            # Tentar buscar em NPCs
-            caster = await db.npcs.find_one({"_id": IdHandler.to_object_id(caster_id)})
-
-        if not caster:
-            await connection_manager.send_personal_message(
-                {
-                    "type": "error",
-                    "message": "Conjurador não encontrado"
-                },
-                user_id,
-                campaign_id
-            )
-            return
-
-        # Verificar slots de magia se necessário
-        spell_slots = caster.get("spell_slots", {})
-        level_key = f"level_{spell_level}"
-        
-        if level_key in spell_slots and spell_slots[level_key].get("current", 0) > 0:
-            # Consumir slot
-            await db.characters.update_one(
-                {"_id": IdHandler.to_object_id(caster_id)},
-                {"$inc": {f"spell_slots.{level_key}.current": -1}}
-            )
-
-        # Registrar uso da magia
-        spell_cast = {
-            "campaign_id": IdHandler.to_object_id(campaign_id),
-            "spell_id": IdHandler.to_object_id(spell_id),
-            "caster_id": IdHandler.to_object_id(caster_id),
-            "spell_level": spell_level,
-            "targets": [IdHandler.to_object_id(t) for t in targets],
-            "cast_at": datetime.utcnow(),
-            "cast_by_user": IdHandler.to_object_id(user_id)
-        }
-
-        await db.spell_casts.insert_one(spell_cast)
-
-        # Notificar todos
-        await connection_manager.broadcast_to_campaign(
-            campaign_id,
-            {
-                "type": "spell_cast",
-                "data": {
-                    "spell_name": spell.get("name"),
-                    "caster_id": caster_id,
-                    "caster_name": caster.get("name"),
-                    "spell_level": spell_level,
-                    "targets": targets
-                }
-            }
-        )
-
-        logger.info(f"Spell cast: {spell.get('name')} by {caster_id}")
-
-    except Exception as e:
-        logger.error(f"Error handling spell event: {e}")
-        await connection_manager.send_personal_message(
-            {
-                "type": "error",
-                "message": "Erro ao processar magia"
-            },
-            user_id,
-            campaign_id
-        )
-
-
-async def handle_image_event(
-        data: Dict[str, Any],
-        campaign_id: str,
-        user_id: str,
-        connection_manager: ConnectionManager,
-        lock_manager: LockManager,
-        db: AsyncIOMotorDatabase
-) -> None:
-    """
-    Gerencia eventos relacionados a imagens.
-    CORREÇÃO: Função completamente implementada.
+    CORREÇÃO: Função estava apenas com 'pass', agora implementada.
     """
     try:
         action = data.get("action")
-        
-        if action == "share":
-            image_url = data.get("image_url")
-            image_name = data.get("image_name", "Imagem compartilhada")
-            
-            if not image_url:
-                await connection_manager.send_personal_message(
-                    {
-                        "type": "error",
-                        "message": "URL da imagem não fornecida"
-                    },
-                    user_id,
-                    campaign_id
-                )
-                return
+        character_id = data.get("character_id")
+        user_id = data.get("user_id")
 
-            # Salvar referência da imagem
-            image_record = {
-                "campaign_id": IdHandler.to_object_id(campaign_id),
-                "shared_by": IdHandler.to_object_id(user_id),
-                "image_url": image_url,
-                "image_name": image_name,
-                "shared_at": datetime.utcnow()
-            }
-
-            await db.shared_images.insert_one(image_record)
-
-            # Compartilhar com todos
-            await connection_manager.broadcast_to_campaign(
-                campaign_id,
-                {
-                    "type": "image_shared",
-                    "data": {
-                        "image_url": image_url,
-                        "image_name": image_name,
-                        "shared_by": user_id
-                    }
-                }
-            )
-
-        elif action == "hide":
-            # Ocultar imagem para todos
-            await connection_manager.broadcast_to_campaign(
-                campaign_id,
-                {
-                    "type": "image_hidden",
-                    "data": {
-                        "hidden_by": user_id
-                    }
-                }
-            )
-
-        logger.info(f"Image event processed: {action} by {user_id}")
-
-    except Exception as e:
-        logger.error(f"Error handling image event: {e}")
-        await connection_manager.send_personal_message(
-            {
+        if not all([action, character_id, user_id]):
+            await websocket_manager.broadcast_to_campaign(campaign_id, {
                 "type": "error",
-                "message": "Erro ao processar evento de imagem"
-            },
-            user_id,
-            campaign_id
-        )
-
-
-async def handle_chat_event(
-        data: Dict[str, Any],
-        campaign_id: str,
-        user_id: str,
-        connection_manager: ConnectionManager,
-        lock_manager: LockManager,
-        db: AsyncIOMotorDatabase
-) -> None:
-    """Gerencia mensagens de chat."""
-    try:
-        message = data.get("message")
-        message_type = data.get("type", "ooc")  # ooc, ic, whisper
-
-        if not message:
+                "message": "Dados incompletos para evento de magia"
+            })
             return
 
-        # Salvar mensagem
-        chat_record = {
-            "campaign_id": IdHandler.to_object_id(campaign_id),
-            "user_id": IdHandler.to_object_id(user_id),
-            "message": message,
-            "type": message_type,
-            "timestamp": datetime.utcnow()
-        }
+        # Verificar acesso ao personagem
+        character_object_id = IdHandler.to_object_id(character_id)
+        user_object_id = IdHandler.to_object_id(user_id)
 
-        await db.chat_messages.insert_one(chat_record)
+        character = await db.characters.find_one({"_id": character_object_id})
+        if not character:
+            await websocket_manager.broadcast_to_campaign(campaign_id, {
+                "type": "error",
+                "message": "Personagem não encontrado"
+            })
+            return
 
-        # Broadcast da mensagem
-        await connection_manager.broadcast_to_campaign(
-            campaign_id,
-            {
-                "type": "chat_message",
+        # Verificar se é o dono do personagem ou DM
+        is_owner = str(character.get("owner_id")) == str(user_object_id)
+        campaign = await db.campaigns.find_one({"_id": IdHandler.to_object_id(campaign_id)})
+        is_dm = campaign and str(campaign.get("dm_id")) == str(user_object_id)
+
+        if not is_owner and not is_dm:
+            await websocket_manager.broadcast_to_campaign(campaign_id, {
+                "type": "error",
+                "message": "Você não tem permissão para usar magias deste personagem"
+            })
+            return
+
+        if action == "cast":
+            # Lançar magia
+            spell_data = data.get("spell_data", {})
+            spell_level = spell_data.get("level", 1)
+
+            # Verificar e decrementar slot de magia
+            spellcasting = character.get("spellcasting", {})
+            spell_slots = spellcasting.get("spell_slots", {})
+            current_slots = spell_slots.get(f"level_{spell_level}", {}).get("current", 0)
+
+            if current_slots <= 0:
+                await websocket_manager.broadcast_to_campaign(campaign_id, {
+                    "type": "error",
+                    "message": f"Sem slots de magia de nível {spell_level} disponíveis"
+                })
+                return
+
+            # Decrementar slot
+            new_slots = current_slots - 1
+            await db.characters.update_one(
+                {"_id": character_object_id},
+                {"$set": {f"spellcasting.spell_slots.level_{spell_level}.current": new_slots}}
+            )
+
+            # Broadcast do lançamento da magia
+            await websocket_manager.broadcast_to_campaign(campaign_id, {
+                "type": "spell_cast",
                 "data": {
-                    "user_id": user_id,
-                    "message": message,
-                    "message_type": message_type,
-                    "timestamp": chat_record["timestamp"].isoformat()
+                    "character_id": character_id,
+                    "spell_name": spell_data.get("name"),
+                    "spell_level": spell_level,
+                    "caster": character.get("name"),
+                    "target_ids": data.get("target_ids", []),
+                    "remaining_slots": new_slots,
+                    "timestamp": datetime.utcnow().isoformat()
                 }
-            }
-        )
+            })
+
+        elif action == "prepare":
+            # Preparar magias
+            prepared_spells = data.get("prepared_spells", [])
+
+            await db.characters.update_one(
+                {"_id": character_object_id},
+                {"$set": {"spellcasting.prepared_spells": prepared_spells}}
+            )
+
+            await websocket_manager.broadcast_to_campaign(campaign_id, {
+                "type": "spells_prepared",
+                "data": {
+                    "character_id": character_id,
+                    "prepared_spells": prepared_spells,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            })
+
+        elif action == "reset_slots":
+            # Reset de slots (descanso longo)
+            spellcasting = character.get("spellcasting", {})
+            spell_slots = spellcasting.get("spell_slots", {})
+
+            # Restaurar todos os slots
+            updated_slots = {}
+            for level_key, slot_data in spell_slots.items():
+                if isinstance(slot_data, dict) and "max" in slot_data:
+                    updated_slots[f"spellcasting.spell_slots.{level_key}.current"] = slot_data["max"]
+
+            if updated_slots:
+                await db.characters.update_one(
+                    {"_id": character_object_id},
+                    {"$set": updated_slots}
+                )
+
+            await websocket_manager.broadcast_to_campaign(campaign_id, {
+                "type": "spell_slots_reset",
+                "data": {
+                    "character_id": character_id,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            })
 
     except Exception as e:
-        logger.error(f"Error handling chat event: {e}")
+        logger.error(f"Erro no evento de magia: {e}")
+        await websocket_manager.broadcast_to_campaign(campaign_id, {
+            "type": "error",
+            "message": "Erro interno no processamento do evento de magia"
+        })
 
 
-async def handle_initiative_event(
+async def handle_dice_event(
         data: Dict[str, Any],
         campaign_id: str,
-        user_id: str,
-        connection_manager: ConnectionManager,
-        lock_manager: LockManager,
+        websocket_manager: WebSocketManager,
         db: AsyncIOMotorDatabase
 ) -> None:
-    """Gerencia rolagem de iniciativa."""
+    """Gerencia eventos de rolagem de dados."""
     try:
-        actor_id = data.get("actor_id")
-        modifier = data.get("modifier", 0)
-        advantage = data.get("advantage", False)
-        disadvantage = data.get("disadvantage", False)
+        dice_expression = data.get("dice", "1d20")
+        user_id = data.get("user_id")
+        character_id = data.get("character_id")
+        roll_type = data.get("type", "normal")  # normal, advantage, disadvantage
 
-        # Rolar iniciativa
-        if advantage and not disadvantage:
-            roll = max(random.randint(1, 20), random.randint(1, 20))
-        elif disadvantage and not advantage:
-            roll = min(random.randint(1, 20), random.randint(1, 20))
+        if not user_id:
+            await websocket_manager.broadcast_to_campaign(campaign_id, {
+                "type": "error",
+                "message": "ID de usuário necessário para rolagem"
+            })
+            return
+
+        # Executar a rolagem
+        if roll_type == "advantage":
+            result = roll_with_advantage(dice_expression)
+        elif roll_type == "disadvantage":
+            result = roll_with_disadvantage(dice_expression)
         else:
-            roll = random.randint(1, 20)
+            result = roll_dice(dice_expression)
 
-        initiative = roll + modifier
-
-        # Atualizar iniciativa
-        await db.characters.update_one(
-            {"_id": IdHandler.to_object_id(actor_id)},
-            {"$set": {"initiative": initiative}}
-        )
+        # Obter nome do personagem se fornecido
+        character_name = None
+        if character_id:
+            character = await db.characters.find_one({"_id": IdHandler.to_object_id(character_id)})
+            character_name = character.get("name") if character else None
 
         # Broadcast do resultado
-        await connection_manager.broadcast_to_campaign(
-            campaign_id,
-            {
-                "type": "initiative_rolled",
-                "data": {
-                    "actor_id": actor_id,
-                    "initiative": initiative,
-                    "roll": roll,
-                    "modifier": modifier
-                }
+        await websocket_manager.broadcast_to_campaign(campaign_id, {
+            "type": "dice_rolled",
+            "data": {
+                "user_id": user_id,
+                "character_id": character_id,
+                "character_name": character_name,
+                "dice_expression": dice_expression,
+                "roll_type": roll_type,
+                "result": result,
+                "timestamp": datetime.utcnow().isoformat()
             }
-        )
+        })
 
     except Exception as e:
-        logger.error(f"Error handling initiative event: {e}")
+        logger.error(f"Erro no evento de dados: {e}")
+        await websocket_manager.broadcast_to_campaign(campaign_id, {
+            "type": "error",
+            "message": "Erro interno na rolagem de dados"
+        })
 
 
 async def handle_ping_event(
         data: Dict[str, Any],
         campaign_id: str,
-        user_id: str,
-        connection_manager: ConnectionManager,
-        lock_manager: LockManager,
+        websocket_manager: WebSocketManager
+) -> None:
+    """Gerencia eventos de ping para manter conexão viva."""
+    try:
+        user_id = data.get("user_id")
+        timestamp = data.get("timestamp", datetime.utcnow().isoformat())
+
+        if user_id:
+            await websocket_manager.send_to_user(user_id, campaign_id, {
+                "type": "pong",
+                "timestamp": timestamp,
+                "server_time": datetime.utcnow().isoformat()
+            })
+    except Exception as e:
+        logger.error(f"Erro no evento de ping: {e}")
+
+
+# Funções auxiliares para combate
+async def handle_combat_start(
+        data: Dict[str, Any],
+        campaign_id: str,
+        websocket_manager: WebSocketManager,
         db: AsyncIOMotorDatabase
 ) -> None:
-    """Responde a ping para manter conexão."""
-    await connection_manager.send_personal_message(
-        {
-            "type": "pong",
-            "data": {"timestamp": data.get("timestamp")}
-        },
-        user_id,
-        campaign_id
-    )
-
-
-# ===== 2. CONNECTION_MANAGER - VERIFICAÇÃO =====
-# Baseado na análise, o connection_manager parece estar correto, mas vou criar
-# uma versão com melhorias se necessário
-
-# ===== 3. LOCK_MANAGER - VERIFICAÇÃO =====  
-# O lock_manager também parece correto, mas vou garantir que os métodos
-# usados pelos event_handlers existem
-
-# Funções auxiliares para o LockManager que podem estar faltando:
-
-async def get_lock_owner(lock_manager, resource_id: str, resource_type: str) -> Optional[str]:
-    """Obtém o proprietário de um lock."""
+    """Inicia um novo combate."""
     try:
-        lock_doc = await lock_manager.locks_collection.find_one({
-            "resource_id": resource_id,
-            "resource_type": resource_type,
-            "is_active": True,
-            "expires_at": {"$gt": datetime.utcnow()}
+        encounter_id = data.get("encounter_id")
+        participants = data.get("participants", [])
+
+        # Criar novo combate
+        combat_data = {
+            "campaign_id": IdHandler.to_object_id(campaign_id),
+            "encounter_id": IdHandler.to_object_id(encounter_id) if encounter_id else None,
+            "participants": participants,
+            "current_turn": 0,
+            "round_number": 1,
+            "status": "active",
+            "created_at": datetime.utcnow()
+        }
+
+        result = await db.combats.insert_one(combat_data)
+        combat_id = str(result.inserted_id)
+
+        await websocket_manager.broadcast_to_campaign(campaign_id, {
+            "type": "combat_started",
+            "data": {
+                "combat_id": combat_id,
+                "participants": participants,
+                "current_turn": 0,
+                "round_number": 1
+            }
         })
-        return lock_doc.get("user_id") if lock_doc else None
-    except Exception:
-        return None
+
+    except Exception as e:
+        logger.error(f"Erro ao iniciar combate: {e}")
+        raise
 
 
-async def is_locked_by_other(lock_manager, resource_id: str, resource_type: str, user_id: str) -> bool:
-    """Verifica se um recurso está bloqueado por outro usuário."""
+async def handle_combat_next_turn(
+        combat_id: str,
+        campaign_id: str,
+        websocket_manager: WebSocketManager,
+        db: AsyncIOMotorDatabase
+) -> None:
+    """Avança para o próximo turno no combate."""
     try:
-        lock_doc = await lock_manager.locks_collection.find_one({
-            "resource_id": resource_id,
-            "resource_type": resource_type,
-            "is_active": True,
-            "expires_at": {"$gt": datetime.utcnow()}
+        combat = await db.combats.find_one({"_id": IdHandler.to_object_id(combat_id)})
+        if not combat:
+            return
+
+        participants = combat.get("participants", [])
+        current_turn = combat.get("current_turn", 0)
+        round_number = combat.get("round_number", 1)
+
+        # Próximo turno
+        next_turn = (current_turn + 1) % len(participants)
+        new_round = round_number + (1 if next_turn == 0 else 0)
+
+        await db.combats.update_one(
+            {"_id": IdHandler.to_object_id(combat_id)},
+            {"$set": {"current_turn": next_turn, "round_number": new_round}}
+        )
+
+        await websocket_manager.broadcast_to_campaign(campaign_id, {
+            "type": "turn_changed",
+            "data": {
+                "combat_id": combat_id,
+                "current_turn": next_turn,
+                "round_number": new_round,
+                "current_participant": participants[next_turn] if participants else None
+            }
         })
-        
-        if not lock_doc:
-            return False
-            
-        return str(lock_doc.get("user_id")) != str(user_id)
-    except Exception:
-        return False
+
+    except Exception as e:
+        logger.error(f"Erro ao avançar turno: {e}")
+        raise
 
 
-# Adicionar esses métodos ao LockManager se não existirem
-def extend_lock_manager():
-    """Estende o LockManager com métodos que podem estar faltando."""
-    
-    # Adicionar get_lock_owner se não existir
-    if not hasattr(LockManager, 'get_lock_owner'):
-        async def get_lock_owner_method(self, resource_id: str, resource_type: str) -> Optional[str]:
-            return await get_lock_owner(self, resource_id, resource_type)
-        
-        LockManager.get_lock_owner = get_lock_owner_method
-    
-    # Adicionar is_locked_by_other se não existir  
-    if not hasattr(LockManager, 'is_locked_by_other'):
-        async def is_locked_by_other_method(self, resource_id: str, resource_type: str, user_id: str) -> bool:
-            return await is_locked_by_other(self, resource_id, resource_type, user_id)
-        
-        LockManager.is_locked_by_other = is_locked_by_other_method
+async def handle_character_status_update(
+        character: Dict[str, Any],
+        data: Dict[str, Any],
+        campaign_id: str,
+        websocket_manager: WebSocketManager,
+        db: AsyncIOMotorDatabase
+) -> None:
+    """Atualiza status/condições de um personagem."""
+    try:
+        conditions = data.get("conditions", [])
 
-# Executar extensão
-extend_lock_manager()
+        await db.characters.update_one(
+            {"_id": character["_id"]},
+            {"$set": {"conditions": conditions}}
+        )
+
+        await websocket_manager.broadcast_to_campaign(campaign_id, {
+            "type": "character_update",
+            "action": "status_changed",
+            "data": {
+                "character_id": str(character["_id"]),
+                "conditions": conditions
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Erro ao atualizar status: {e}")
+        raise

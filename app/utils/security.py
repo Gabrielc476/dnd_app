@@ -1,40 +1,80 @@
 # app/utils/security.py
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+"""
+Utilidades de segurança - CORRIGIDO
+Problemas resolvidos:
+1. ✅ Removidos logs de debug que expunham SECRET_KEY
+2. ✅ Implementado logging seguro usando logger
+3. ✅ Melhorado tratamento de erros
+4. ✅ Adicionada validação de token mais robusta
+"""
 
-import jwt
+import logging
+from datetime import datetime, timedelta
+from typing import Union, Optional, Dict, Any
+from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi import HTTPException, status
-from pydantic import EmailStr
 
 from app.config import settings
 
-# Configuração do contexto de criptografia para senhas
+# Configure logger
+logger = logging.getLogger(__name__)
+
+# Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
-# Funções para hashing e verificação de senhas
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verifica se a senha fornecida corresponde ao hash armazenado."""
-    return pwd_context.verify(plain_password, hashed_password)
+    """
+    Verifica se a senha em texto plano corresponde ao hash.
+
+    Args:
+        plain_password: Senha em texto plano
+        hashed_password: Hash da senha armazenado
+
+    Returns:
+        True se a senha estiver correta, False caso contrário
+    """
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except Exception as e:
+        logger.error(f"Erro ao verificar senha: {type(e).__name__}")
+        return False
 
 
 def get_password_hash(password: str) -> str:
-    """Gera um hash para a senha fornecida."""
-    return pwd_context.hash(password)
-
-
-# Funções para geração e verificação de tokens JWT
-def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
     """
-    Cria um token JWT com os dados fornecidos e uma expiração opcional.
+    Gera um hash seguro da senha.
 
     Args:
-        data: Dados a serem codificados no token
-        expires_delta: Tempo de expiração do token (opcional)
+        password: Senha em texto plano
 
     Returns:
-        Token JWT codificado
+        Hash da senha
+    """
+    try:
+        return pwd_context.hash(password)
+    except Exception as e:
+        logger.error(f"Erro ao gerar hash da senha: {type(e).__name__}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro interno no processamento da senha"
+        )
+
+
+def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
+    """
+    Cria um token JWT de acesso.
+
+    Args:
+        data: Dados a serem incluídos no token
+        expires_delta: Tempo de expiração personalizado
+
+    Returns:
+        Token JWT assinado
+
+    Raises:
+        HTTPException: Se houver erro na criação do token
     """
     to_encode = data.copy()
 
@@ -43,42 +83,139 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
     else:
         expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
 
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    to_encode.update({"exp": expire, "iat": datetime.utcnow()})
 
-    return encoded_jwt
+    try:
+        encoded_jwt = jwt.encode(
+            to_encode,
+            settings.SECRET_KEY,
+            algorithm=settings.ALGORITHM
+        )
+        logger.info("Token de acesso criado com sucesso")
+        return encoded_jwt
+
+    except Exception as e:
+        logger.error(f"Erro ao criar token: {type(e).__name__}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro interno na criação do token"
+        )
 
 
 def decode_access_token(token: str) -> Dict[str, Any]:
+    """
+    Decodifica e valida um token JWT.
+
+    Args:
+        token: Token JWT a ser decodificado
+
+    Returns:
+        Payload do token decodificado
+
+    Raises:
+        HTTPException: Se o token for inválido ou expirado
+    """
     try:
-        # Adicionar log para depuração
-        print(f"Tentando decodificar token com SECRET_KEY: {settings.SECRET_KEY[:5]}...")
+        logger.debug("Validando token de acesso")
 
         payload = jwt.decode(
             token,
             settings.SECRET_KEY,
             algorithms=[settings.ALGORITHM]
         )
-        print(f"Token decodificado com sucesso: sub={payload.get('sub')}")
+
+        # Verificar se o token tem o campo 'sub' (subject)
+        if payload.get("sub") is None:
+            logger.warning("Token sem campo 'sub'")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token inválido - dados incompletos",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        # Verificar expiração manualmente para melhor controle
+        exp = payload.get("exp")
+        if exp and datetime.fromtimestamp(exp) < datetime.utcnow():
+            logger.warning("Token expirado")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token expirado",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        logger.debug("Token validado com sucesso")
         return payload
-    except jwt.ExpiredSignatureError:
-        print("Erro: Token expirado")
+
+    except JWTError as e:
+        logger.warning(f"Erro de JWT: {type(e).__name__}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token expirado",
+            detail="Token inválido",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    except jwt.InvalidTokenError as e:
-        print(f"Erro: Token inválido - {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Token inválido: {str(e)}",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    except HTTPException:
+        # Re-raise HTTPExceptions
+        raise
     except Exception as e:
-        print(f"Erro não esperado ao decodificar token: {str(e)}")
+        logger.error(f"Erro inesperado ao decodificar token: {type(e).__name__}")
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Erro ao processar token: {str(e)}",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro interno na validação do token"
         )
+
+
+def validate_token_format(token: str) -> bool:
+    """
+    Valida se o token tem o formato JWT básico.
+
+    Args:
+        token: Token a ser validado
+
+    Returns:
+        True se o formato estiver correto, False caso contrário
+    """
+    if not token or not isinstance(token, str):
+        return False
+
+    # JWT deve ter 3 partes separadas por pontos
+    parts = token.split('.')
+    return len(parts) == 3
+
+
+def create_refresh_token(user_id: str) -> str:
+    """
+    Cria um token de refresh com duração maior.
+
+    Args:
+        user_id: ID do usuário
+
+    Returns:
+        Refresh token
+    """
+    data = {"sub": user_id, "type": "refresh"}
+    expires_delta = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+
+    return create_access_token(data, expires_delta)
+
+
+def get_current_timestamp() -> str:
+    """
+    Retorna timestamp atual no formato ISO.
+
+    Returns:
+        Timestamp atual
+    """
+    return datetime.utcnow().isoformat()
+
+
+def hash_api_key(api_key: str) -> str:
+    """
+    Gera hash para chaves de API.
+
+    Args:
+        api_key: Chave de API em texto plano
+
+    Returns:
+        Hash da chave de API
+    """
+    return get_password_hash(api_key)
