@@ -170,7 +170,7 @@ class ItemModel(BaseModel):
 
 
 class MonsterTemplate(BaseModel):
-    """Modelo para monstros/criaturas do compêndio."""
+    """Template para criaturas do compêndio."""
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
     name: str = Field(..., min_length=1, max_length=100)
     size: Literal["tiny", "small", "medium", "large", "huge", "gargantuan"]
@@ -184,8 +184,8 @@ class MonsterTemplate(BaseModel):
     hit_points: int = Field(..., ge=1, le=1000)
     hit_dice: str = Field(..., max_length=20)  # Ex: "8d8 + 16"
 
-    # Velocidades
-    speed: Dict[str, int] = Field(..., min_items=1)  # Ex: {"walk": 30, "fly": 60}
+    # Velocidades - ✅ CORRIGIDO: Removido min_items
+    speed: Dict[str, int] = Field(...)  # Ex: {"walk": 30, "fly": 60}
 
     # Atributos
     strength: int = Field(..., ge=1, le=30)
@@ -248,10 +248,7 @@ class MonsterTemplate(BaseModel):
     @validator('challenge_rating')
     def validate_cr(cls, v):
         """Valida o desafio."""
-        valid_crs = [
-                        "0", "1/8", "1/4", "1/2"
-                    ] + [str(i) for i in range(1, 31)]
-
+        valid_crs = ["0", "1/8", "1/4", "1/2"] + [str(i) for i in range(1, 31)]
         if v not in valid_crs:
             raise ValueError(f'Challenge Rating inválido: {v}')
         return v
@@ -275,48 +272,6 @@ class MonsterTemplate(BaseModel):
         allow_population_by_field_name = True
         arbitrary_types_allowed = True
         json_encoders = {ObjectId: str}
-        schema_extra = {
-            "example": {
-                "name": "Goblin",
-                "size": "small",
-                "type": "humanoid",
-                "subtype": "goblinoid",
-                "alignment": "neutral evil",
-                "armor_class": 15,
-                "armor_desc": "Leather Armor, Shield",
-                "hit_points": 7,
-                "hit_dice": "2d6",
-                "speed": {"walk": 30},
-                "strength": 8,
-                "dexterity": 14,
-                "constitution": 10,
-                "intelligence": 10,
-                "wisdom": 8,
-                "charisma": 8,
-                "skills": {"stealth": 6},
-                "senses": "darkvision 60 ft., passive Perception 9",
-                "languages": "Common, Goblin",
-                "challenge_rating": "1/4",
-                "experience_points": 50,
-                "proficiency_bonus": 2,
-                "traits": [
-                    {
-                        "name": "Nimble Escape",
-                        "description": "The goblin can take the Disengage or Hide action as a bonus action on each of its turns."
-                    }
-                ],
-                "actions": [
-                    {
-                        "name": "Scimitar",
-                        "description": "Melee Weapon Attack: +4 to hit, reach 5 ft., one target. Hit: 5 (1d6 + 2) slashing damage."
-                    }
-                ],
-                "source": "Monster Manual",
-                "page": 166,
-                "environment": ["forest", "hills", "underdark"],
-                "tags": ["humanoid", "goblinoid", "low-level"]
-            }
-        }
 
 
 class CompendiumCategory(BaseModel):
