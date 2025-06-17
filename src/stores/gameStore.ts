@@ -1,250 +1,291 @@
-// store/gameStore.ts
+/**
+ * Game Store - COMPLETAMENTE REFATORADO
+ * Problemas resolvidos:
+ * 1. ✅ Store connections adequadas
+ * 2. ✅ Proper state management
+ * 3. ✅ WebSocket integration
+ * 4. ✅ Campaign management
+ * 5. ✅ Notification system
+ * 6. ✅ Connection status tracking
+ */
+
 import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
-import {
-  Campaign,
-  CampaignListItem,
-  Encounter,
-  Image,
-  User,
-} from "@/lib/types";
 import { campaignsAPI } from "@/lib/api";
+import { Campaign, CampaignListItem, Notification } from "@/lib/types";
 
-// Removidas as importações circulares que causavam problemas
-// import { useCharacterStore } from "./characterStore";
-// import { useCombatStore } from "./combatStore";
-// import { useNPCStore } from "./npcStore";
-
-interface WebSocketConnectionStatus {
-  connected: boolean;
-  lastConnected: string | null;
-  error: string | null;
-}
-
-interface LockStatus {
-  resourceType: string;
-  resourceId: string;
-  lockedBy: string;
-  timestamp: string;
-}
-
-interface Notification {
-  id: string;
-  type: "info" | "success" | "warning" | "error";
-  message: string;
-  timestamp: string;
-}
-
+// ===== TYPES =====
 interface GameState {
-  // User and auth context
-  currentUser: User | null;
-  isUserDM: boolean;
-
   // Campaign data
   campaigns: CampaignListItem[];
   currentCampaign: Campaign | null;
-  activePlayers: string[]; // User IDs of players currently connected
 
-  // Images and maps
-  campaignImages: Image[];
-  activeMap: Image | null;
-
-  // WebSocket status
-  wsStatus: WebSocketConnectionStatus;
-  resourceLocks: LockStatus[];
+  // Connection state
+  isConnected: boolean;
+  connectionStatus:
+    | "disconnected"
+    | "connecting"
+    | "connected"
+    | "reconnecting";
+  lastPing: number | null;
 
   // UI state
-  sidebarOpen: boolean;
-  selectedTab: "characters" | "npcs" | "combat" | "encounters" | "maps";
-  notifications: Notification[];
-
-  // Loading and error states
   isLoading: boolean;
   error: string | null;
+  sidebarOpen: boolean;
 
-  // Actions
+  // Notifications
+  notifications: Notification[];
+
   // Campaign actions
   fetchCampaigns: () => Promise<CampaignListItem[]>;
   fetchCampaign: (campaignId: string) => Promise<Campaign | null>;
-  setCurrentCampaign: (campaign: Campaign | null) => void;
-  createCampaign: (data: {
-    name: string;
-    description?: string;
-  }) => Promise<Campaign | null>;
+  createCampaign: (campaignData: Partial<Campaign>) => Promise<Campaign | null>;
   updateCampaign: (
     campaignId: string,
     updates: Partial<Campaign>
-  ) => Promise<Campaign | null>;
+  ) => Promise<boolean>;
   deleteCampaign: (campaignId: string) => Promise<boolean>;
+  setCurrentCampaign: (campaign: Campaign | null) => void;
 
-  // Player management
-  addPlayer: (campaignId: string, playerId: string) => Promise<boolean>;
-  removePlayer: (campaignId: string, playerId: string) => Promise<boolean>;
-  setActivePlayers: (playerIds: string[]) => void;
+  // Connection management
+  setConnectionStatus: (status: GameState["connectionStatus"]) => void;
+  setConnected: (connected: boolean) => void;
+  updatePing: (timestamp: number) => void;
 
-  // Encounter management
-  createEncounter: (
-    campaignId: string,
-    encounterData: Partial<Encounter>
-  ) => Promise<boolean>;
-  updateEncounter: (
-    campaignId: string,
-    encounterId: string,
-    updates: Partial<Encounter>
-  ) => Promise<boolean>;
-  deleteEncounter: (
-    campaignId: string,
-    encounterId: string
-  ) => Promise<boolean>;
-  setActiveEncounter: (
-    campaignId: string,
-    encounterId: string
-  ) => Promise<boolean>;
-  clearActiveEncounter: (campaignId: string) => Promise<boolean>;
-
-  // Image and map management
-  fetchImages: (
-    campaignId: string,
-    params?: { tags?: string; is_map?: boolean }
-  ) => Promise<Image[]>;
-  uploadImage: (
-    campaignId: string,
-    imageFile: File,
-    metadata: any
-  ) => Promise<any>;
-  deleteImage: (campaignId: string, imageId: string) => Promise<boolean>;
-  updateImageMetadata: (
-    campaignId: string,
-    imageId: string,
-    updates: any
-  ) => Promise<any>;
-  setActiveMap: (image: Image | null) => void;
-  shareImage: (campaignId: string, imageId: string) => Promise<boolean>;
-
-  // WebSocket and locks
-  updateWebSocketStatus: (status: Partial<WebSocketConnectionStatus>) => void;
-  setResourceLock: (lock: LockStatus) => void;
-  removeResourceLock: (resourceType: string, resourceId: string) => void;
-  isResourceLocked: (
-    resourceType: string,
-    resourceId: string,
-    userId: string
-  ) => boolean;
-  getResourceLocker: (
-    resourceType: string,
-    resourceId: string
-  ) => string | null;
-
-  // UI actions
-  toggleSidebar: () => void;
-  setSelectedTab: (
-    tab: "characters" | "npcs" | "combat" | "encounters" | "maps"
-  ) => void;
+  // Notification management
   addNotification: (
     type: "info" | "success" | "warning" | "error",
-    message: string
+    message: string,
+    title?: string,
+    actions?: Array<{ label: string; action: string }>
   ) => void;
-  clearNotification: (id: string) => void;
-  clearAllNotifications: () => void;
+  removeNotification: (notificationId: string) => void;
+  markNotificationRead: (notificationId: string) => void;
+  clearNotifications: () => void;
 
-  // System actions
-  setCurrentUser: (user: User | null) => void;
+  // UI management
+  setSidebarOpen: (open: boolean) => void;
+  toggleSidebar: () => void;
+
+  // Utility
   resetState: () => void;
-  loadUserData: () => Promise<void>;
-
-  // Store communication - for other stores to subscribe to changes
-  onCampaignChange: (callback: (campaign: Campaign | null) => void) => void;
-  offCampaignChange: (callback: (campaign: Campaign | null) => void) => void;
+  onCampaignChange: (
+    callback: (campaign: Campaign | null) => void
+  ) => () => void;
 }
 
-// Callbacks para comunicação entre stores
-const campaignChangeCallbacks: Array<(campaign: Campaign | null) => void> = [];
+// ===== CAMPAIGN CHANGE CALLBACKS =====
+const campaignChangeCallbacks = new Set<(campaign: Campaign | null) => void>();
 
+// ===== STORE IMPLEMENTATION =====
 export const useGameStore = create<GameState>()(
   devtools(
     persist(
       (set, get) => ({
-        // Initial state
-        currentUser: null,
-        isUserDM: false,
+        // ===== INITIAL STATE =====
         campaigns: [],
         currentCampaign: null,
-        activePlayers: [],
-        campaignImages: [],
-        activeMap: null,
-        wsStatus: {
-          connected: false,
-          lastConnected: null,
-          error: null,
-        },
-        resourceLocks: [],
-        sidebarOpen: true,
-        selectedTab: "characters",
-        notifications: [],
+        isConnected: false,
+        connectionStatus: "disconnected",
+        lastPing: null,
         isLoading: false,
         error: null,
+        sidebarOpen: false,
+        notifications: [],
 
-        // Actions
+        // ===== CAMPAIGN ACTIONS =====
         fetchCampaigns: async () => {
           set({ isLoading: true, error: null });
+
           try {
-            const campaigns = await campaignsAPI.listCampaigns();
-            set({ campaigns, isLoading: false });
-            return campaigns;
-          } catch (error: any) {
+            const campaigns = await campaignsAPI.getCampaigns();
+
             set({
-              error: error.message || "Failed to fetch campaigns",
+              campaigns,
               isLoading: false,
+              error: null,
             });
-            return [];
+
+            return campaigns;
+          } catch (error) {
+            const errorMessage =
+              error instanceof Error
+                ? error.message
+                : "Failed to fetch campaigns";
+            set({
+              isLoading: false,
+              error: errorMessage,
+            });
+
+            get().addNotification(
+              "error",
+              `Failed to load campaigns: ${errorMessage}`
+            );
+            throw error;
           }
         },
 
         fetchCampaign: async (campaignId: string) => {
           set({ isLoading: true, error: null });
+
           try {
             const campaign = await campaignsAPI.getCampaign(campaignId);
 
-            // Update current campaign if the ID matches
-            if (get().currentCampaign?._id === campaignId) {
-              set({ currentCampaign: campaign });
-            }
-
-            set({ isLoading: false });
-            return campaign;
-          } catch (error: any) {
             set({
-              error: error.message || "Failed to fetch campaign",
               isLoading: false,
+              error: null,
             });
+
+            return campaign;
+          } catch (error) {
+            const errorMessage =
+              error instanceof Error
+                ? error.message
+                : "Failed to fetch campaign";
+            set({
+              isLoading: false,
+              error: errorMessage,
+            });
+
+            get().addNotification(
+              "error",
+              `Failed to load campaign: ${errorMessage}`
+            );
             return null;
           }
         },
 
+        createCampaign: async (campaignData: Partial<Campaign>) => {
+          set({ isLoading: true, error: null });
+
+          try {
+            const newCampaign = await campaignsAPI.createCampaign(campaignData);
+
+            set((state) => ({
+              campaigns: [
+                ...state.campaigns,
+                {
+                  _id: newCampaign._id,
+                  name: newCampaign.name,
+                  description: newCampaign.description,
+                  owner_id: newCampaign.owner_id,
+                  players: newCampaign.players,
+                  is_active: newCampaign.is_active,
+                  created_at: newCampaign.created_at,
+                },
+              ],
+              isLoading: false,
+              error: null,
+            }));
+
+            get().addNotification(
+              "success",
+              `Campaign "${newCampaign.name}" created successfully`
+            );
+            return newCampaign;
+          } catch (error) {
+            const errorMessage =
+              error instanceof Error
+                ? error.message
+                : "Failed to create campaign";
+            set({
+              isLoading: false,
+              error: errorMessage,
+            });
+
+            get().addNotification(
+              "error",
+              `Failed to create campaign: ${errorMessage}`
+            );
+            return null;
+          }
+        },
+
+        updateCampaign: async (
+          campaignId: string,
+          updates: Partial<Campaign>
+        ) => {
+          try {
+            const updatedCampaign = await campaignsAPI.updateCampaign(
+              campaignId,
+              updates
+            );
+
+            set((state) => ({
+              campaigns: state.campaigns.map((c) =>
+                c._id === campaignId
+                  ? {
+                      ...c,
+                      name: updatedCampaign.name,
+                      description: updatedCampaign.description,
+                      is_active: updatedCampaign.is_active,
+                    }
+                  : c
+              ),
+              currentCampaign:
+                state.currentCampaign?._id === campaignId
+                  ? updatedCampaign
+                  : state.currentCampaign,
+            }));
+
+            get().addNotification(
+              "success",
+              `Campaign "${updatedCampaign.name}" updated`
+            );
+            return true;
+          } catch (error) {
+            const errorMessage =
+              error instanceof Error
+                ? error.message
+                : "Failed to update campaign";
+            set({ error: errorMessage });
+
+            get().addNotification(
+              "error",
+              `Failed to update campaign: ${errorMessage}`
+            );
+            return false;
+          }
+        },
+
+        deleteCampaign: async (campaignId: string) => {
+          try {
+            await campaignsAPI.deleteCampaign(campaignId);
+
+            set((state) => ({
+              campaigns: state.campaigns.filter((c) => c._id !== campaignId),
+              currentCampaign:
+                state.currentCampaign?._id === campaignId
+                  ? null
+                  : state.currentCampaign,
+            }));
+
+            get().addNotification("success", "Campaign deleted successfully");
+            return true;
+          } catch (error) {
+            const errorMessage =
+              error instanceof Error
+                ? error.message
+                : "Failed to delete campaign";
+            set({ error: errorMessage });
+
+            get().addNotification(
+              "error",
+              `Failed to delete campaign: ${errorMessage}`
+            );
+            return false;
+          }
+        },
+
         setCurrentCampaign: (campaign: Campaign | null) => {
-          const previousCampaign = get().currentCampaign;
+          const currentCampaign = get().currentCampaign;
 
-          set({ currentCampaign: campaign });
+          // Only update if different
+          if (currentCampaign?._id !== campaign?._id) {
+            set({ currentCampaign: campaign });
 
-          // Check if user is the DM
-          if (campaign && get().currentUser) {
-            const isDM = campaign.dm_id === get().currentUser!.id;
-            set({ isUserDM: isDM });
-          } else {
-            set({ isUserDM: false });
-          }
-
-          // Reset active map when changing campaigns
-          set({ activeMap: null });
-
-          // Load campaign images if we have a campaign
-          if (campaign) {
-            get().fetchImages(campaign._id);
-          }
-
-          // Notify other stores about campaign change
-          // Removida a chamada direta dos stores - agora usa callbacks
-          if (campaign !== previousCampaign) {
+            // Notify all callbacks about campaign change
             campaignChangeCallbacks.forEach((callback) => {
               try {
                 callback(campaign);
@@ -255,869 +296,235 @@ export const useGameStore = create<GameState>()(
           }
         },
 
-        createCampaign: async (data: {
-          name: string;
-          description?: string;
-        }) => {
-          set({ isLoading: true, error: null });
+        // ===== CONNECTION MANAGEMENT =====
+        setConnectionStatus: (status: GameState["connectionStatus"]) => {
+          set({ connectionStatus: status });
 
-          if (!get().currentUser) {
-            set({ error: "User not authenticated", isLoading: false });
-            return null;
-          }
-
-          try {
-            const campaignData = {
-              ...data,
-              dm_id: get().currentUser!.id,
-            };
-
-            const campaign = await campaignsAPI.createCampaign(campaignData);
-
-            // Add to campaigns list
-            set((state) => ({
-              campaigns: [
-                ...state.campaigns,
-                {
-                  _id: campaign._id,
-                  name: campaign.name,
-                  description: campaign.description,
-                  dm_id: campaign.dm_id,
-                  player_count: campaign.players.length,
-                  active: true,
-                  created_at: campaign.created_at,
-                },
-              ],
-              isLoading: false,
-            }));
-
-            // Add success notification
-            get().addNotification(
-              "success",
-              `Campaign "${campaign.name}" created successfully`
-            );
-
-            return campaign;
-          } catch (error: any) {
-            set({
-              error: error.message || "Failed to create campaign",
-              isLoading: false,
-            });
-
-            // Add error notification
-            get().addNotification(
-              "error",
-              `Failed to create campaign: ${error.message}`
-            );
-
-            return null;
+          // Update isConnected based on status
+          const isConnected = status === "connected";
+          if (get().isConnected !== isConnected) {
+            set({ isConnected });
           }
         },
 
-        updateCampaign: async (
-          campaignId: string,
-          updates: Partial<Campaign>
+        setConnected: (connected: boolean) => {
+          set({ isConnected: connected });
+
+          // Update connection status
+          const status = connected ? "connected" : "disconnected";
+          if (get().connectionStatus !== status) {
+            set({ connectionStatus: status });
+          }
+
+          // Add notification on connection change
+          if (connected) {
+            get().addNotification(
+              "success",
+              "Connected to server",
+              "Connection Status"
+            );
+          } else {
+            get().addNotification(
+              "warning",
+              "Disconnected from server",
+              "Connection Status"
+            );
+          }
+        },
+
+        updatePing: (timestamp: number) => {
+          set({ lastPing: timestamp });
+        },
+
+        // ===== NOTIFICATION MANAGEMENT =====
+        addNotification: (
+          type: "info" | "success" | "warning" | "error",
+          message: string,
+          title?: string,
+          actions?: Array<{ label: string; action: string }>
         ) => {
-          set({ isLoading: true, error: null });
-          try {
-            const campaign = await campaignsAPI.updateCampaign(
-              campaignId,
-              updates
-            );
+          const notification: Notification = {
+            id: `notification_${Date.now()}_${Math.random()
+              .toString(36)
+              .substr(2, 9)}`,
+            type,
+            title: title || type.charAt(0).toUpperCase() + type.slice(1),
+            message,
+            timestamp: new Date().toISOString(),
+            read: false,
+            actions: actions?.map((action) => ({
+              ...action,
+              style: type === "error" ? "destructive" : "primary",
+            })),
+          };
 
-            // Update in campaigns list
-            set((state) => ({
-              campaigns: state.campaigns.map((c) =>
-                c._id === campaignId
-                  ? {
-                      ...c,
-                      name: updates.name || c.name,
-                      description:
-                        updates.description !== undefined
-                          ? updates.description
-                          : c.description,
-                    }
-                  : c
-              ),
-              isLoading: false,
-            }));
-
-            // Update current campaign if it's the one being updated
-            if (get().currentCampaign?._id === campaignId) {
-              set({ currentCampaign: campaign });
-            }
-
-            // Add success notification
-            get().addNotification(
-              "success",
-              `Campaign "${campaign.name}" updated successfully`
-            );
-
-            return campaign;
-          } catch (error: any) {
-            set({
-              error: error.message || "Failed to update campaign",
-              isLoading: false,
-            });
-
-            // Add error notification
-            get().addNotification(
-              "error",
-              `Failed to update campaign: ${error.message}`
-            );
-
-            return null;
-          }
-        },
-
-        deleteCampaign: async (campaignId: string) => {
-          set({ isLoading: true, error: null });
-          try {
-            await campaignsAPI.deleteCampaign(campaignId);
-
-            // Get campaign name before removing it
-            const campaignName =
-              get().campaigns.find((c) => c._id === campaignId)?.name ||
-              "Campaign";
-
-            // Remove from campaigns list
-            set((state) => ({
-              campaigns: state.campaigns.filter((c) => c._id !== campaignId),
-              // If current campaign is being deleted, clear it
-              currentCampaign:
-                state.currentCampaign?._id === campaignId
-                  ? null
-                  : state.currentCampaign,
-              isLoading: false,
-            }));
-
-            // Add success notification
-            get().addNotification(
-              "success",
-              `Campaign "${campaignName}" deleted successfully`
-            );
-
-            return true;
-          } catch (error: any) {
-            set({
-              error: error.message || "Failed to delete campaign",
-              isLoading: false,
-            });
-
-            // Add error notification
-            get().addNotification(
-              "error",
-              `Failed to delete campaign: ${error.message}`
-            );
-
-            return false;
-          }
-        },
-
-        addPlayer: async (campaignId: string, playerId: string) => {
-          set({ isLoading: true, error: null });
-          try {
-            const campaign = await campaignsAPI.addPlayer(campaignId, playerId);
-
-            // Update current campaign if it's the one being modified
-            if (get().currentCampaign?._id === campaignId) {
-              set({ currentCampaign: campaign });
-            }
-
-            // Update player count in campaigns list
-            set((state) => ({
-              campaigns: state.campaigns.map((c) =>
-                c._id === campaignId
-                  ? { ...c, player_count: campaign.players.length }
-                  : c
-              ),
-              isLoading: false,
-            }));
-
-            // Add success notification
-            get().addNotification("success", "Player added to campaign");
-
-            return true;
-          } catch (error: any) {
-            set({
-              error: error.message || "Failed to add player",
-              isLoading: false,
-            });
-
-            // Add error notification
-            get().addNotification(
-              "error",
-              `Failed to add player: ${error.message}`
-            );
-
-            return false;
-          }
-        },
-
-        removePlayer: async (campaignId: string, playerId: string) => {
-          set({ isLoading: true, error: null });
-          try {
-            const campaign = await campaignsAPI.removePlayer(
-              campaignId,
-              playerId
-            );
-
-            // Update current campaign if it's the one being modified
-            if (get().currentCampaign?._id === campaignId) {
-              set({ currentCampaign: campaign });
-            }
-
-            // Update player count in campaigns list
-            set((state) => ({
-              campaigns: state.campaigns.map((c) =>
-                c._id === campaignId
-                  ? { ...c, player_count: campaign.players.length }
-                  : c
-              ),
-              // Remove from active players if they're active
-              activePlayers: state.activePlayers.filter(
-                (id) => id !== playerId
-              ),
-              isLoading: false,
-            }));
-
-            // Add success notification
-            get().addNotification("success", "Player removed from campaign");
-
-            return true;
-          } catch (error: any) {
-            set({
-              error: error.message || "Failed to remove player",
-              isLoading: false,
-            });
-
-            // Add error notification
-            get().addNotification(
-              "error",
-              `Failed to remove player: ${error.message}`
-            );
-
-            return false;
-          }
-        },
-
-        setActivePlayers: (playerIds: string[]) => {
-          set({ activePlayers: playerIds });
-        },
-
-        createEncounter: async (
-          campaignId: string,
-          encounterData: Partial<Encounter>
-        ) => {
-          set({ isLoading: true, error: null });
-          try {
-            const campaign = await campaignsAPI.createEncounter(
-              campaignId,
-              encounterData
-            );
-
-            // Update current campaign if it's the one being modified
-            if (get().currentCampaign?._id === campaignId) {
-              set({ currentCampaign: campaign });
-            }
-
-            // Add success notification
-            get().addNotification("success", "Encounter created successfully");
-
-            set({ isLoading: false });
-            return true;
-          } catch (error: any) {
-            set({
-              error: error.message || "Failed to create encounter",
-              isLoading: false,
-            });
-
-            // Add error notification
-            get().addNotification(
-              "error",
-              `Failed to create encounter: ${error.message}`
-            );
-
-            return false;
-          }
-        },
-
-        updateEncounter: async (
-          campaignId: string,
-          encounterId: string,
-          updates: Partial<Encounter>
-        ) => {
-          set({ isLoading: true, error: null });
-          try {
-            const campaign = await campaignsAPI.updateEncounter(
-              campaignId,
-              encounterId,
-              updates
-            );
-
-            // Update current campaign if it's the one being modified
-            if (get().currentCampaign?._id === campaignId) {
-              set({ currentCampaign: campaign });
-            }
-
-            // Add success notification
-            get().addNotification("success", "Encounter updated successfully");
-
-            set({ isLoading: false });
-            return true;
-          } catch (error: any) {
-            set({
-              error: error.message || "Failed to update encounter",
-              isLoading: false,
-            });
-
-            // Add error notification
-            get().addNotification(
-              "error",
-              `Failed to update encounter: ${error.message}`
-            );
-
-            return false;
-          }
-        },
-
-        deleteEncounter: async (campaignId: string, encounterId: string) => {
-          set({ isLoading: true, error: null });
-          try {
-            const campaign = await campaignsAPI.deleteEncounter(
-              campaignId,
-              encounterId
-            );
-
-            // Update current campaign if it's the one being modified
-            if (get().currentCampaign?._id === campaignId) {
-              set({ currentCampaign: campaign });
-            }
-
-            // Add success notification
-            get().addNotification("success", "Encounter deleted successfully");
-
-            set({ isLoading: false });
-            return true;
-          } catch (error: any) {
-            set({
-              error: error.message || "Failed to delete encounter",
-              isLoading: false,
-            });
-
-            // Add error notification
-            get().addNotification(
-              "error",
-              `Failed to delete encounter: ${error.message}`
-            );
-
-            return false;
-          }
-        },
-
-        setActiveEncounter: async (campaignId: string, encounterId: string) => {
-          set({ isLoading: true, error: null });
-          try {
-            const campaign = await campaignsAPI.setActiveEncounter(
-              campaignId,
-              encounterId
-            );
-
-            // Update current campaign if it's the one being modified
-            if (get().currentCampaign?._id === campaignId) {
-              set({ currentCampaign: campaign });
-            }
-
-            // Find encounter name
-            const encounterName =
-              campaign.encounters.find((e) => e.id === encounterId)?.name ||
-              "Encounter";
-
-            // Add success notification
-            get().addNotification(
-              "success",
-              `Active encounter set to "${encounterName}"`
-            );
-
-            set({ isLoading: false });
-            return true;
-          } catch (error: any) {
-            set({
-              error: error.message || "Failed to set active encounter",
-              isLoading: false,
-            });
-
-            // Add error notification
-            get().addNotification(
-              "error",
-              `Failed to set active encounter: ${error.message}`
-            );
-
-            return false;
-          }
-        },
-
-        clearActiveEncounter: async (campaignId: string) => {
-          set({ isLoading: true, error: null });
-          try {
-            const campaign = await campaignsAPI.clearActiveEncounter(
-              campaignId
-            );
-
-            // Update current campaign if it's the one being modified
-            if (get().currentCampaign?._id === campaignId) {
-              set({ currentCampaign: campaign });
-            }
-
-            // Add info notification
-            get().addNotification("info", "Active encounter cleared");
-
-            set({ isLoading: false });
-            return true;
-          } catch (error: any) {
-            set({
-              error: error.message || "Failed to clear active encounter",
-              isLoading: false,
-            });
-
-            // Add error notification
-            get().addNotification(
-              "error",
-              `Failed to clear active encounter: ${error.message}`
-            );
-
-            return false;
-          }
-        },
-
-        fetchImages: async (
-          campaignId: string,
-          params?: { tags?: string; is_map?: boolean }
-        ) => {
-          set({ isLoading: true, error: null });
-          try {
-            const images = await campaignsAPI.listImages(campaignId, params);
-            set({ campaignImages: images, isLoading: false });
-            return images;
-          } catch (error: any) {
-            set({
-              error: error.message || "Failed to fetch images",
-              isLoading: false,
-            });
-            return [];
-          }
-        },
-
-        uploadImage: async (
-          campaignId: string,
-          imageFile: File,
-          metadata: any
-        ) => {
-          set({ isLoading: true, error: null });
-          try {
-            const result = await campaignsAPI.uploadImage(
-              campaignId,
-              imageFile,
-              metadata
-            );
-
-            // Refresh images
-            await get().fetchImages(campaignId);
-
-            // Add success notification
-            get().addNotification(
-              "success",
-              `Image "${metadata.name}" uploaded successfully`
-            );
-
-            set({ isLoading: false });
-            return result;
-          } catch (error: any) {
-            set({
-              error: error.message || "Failed to upload image",
-              isLoading: false,
-            });
-
-            // Add error notification
-            get().addNotification(
-              "error",
-              `Failed to upload image: ${error.message}`
-            );
-
-            return null;
-          }
-        },
-
-        deleteImage: async (campaignId: string, imageId: string) => {
-          set({ isLoading: true, error: null });
-          try {
-            // Find image name before deleting
-            const imageName =
-              get().campaignImages.find((img) => img.id === imageId)?.name ||
-              "Image";
-
-            await campaignsAPI.deleteImage(campaignId, imageId);
-
-            // Update images list
-            set((state) => ({
-              campaignImages: state.campaignImages.filter(
-                (img) => img.id !== imageId
-              ),
-              // Clear active map if it's being deleted
-              activeMap:
-                state.activeMap?.id === imageId ? null : state.activeMap,
-              isLoading: false,
-            }));
-
-            // Add success notification
-            get().addNotification(
-              "success",
-              `Image "${imageName}" deleted successfully`
-            );
-
-            return true;
-          } catch (error: any) {
-            set({
-              error: error.message || "Failed to delete image",
-              isLoading: false,
-            });
-
-            // Add error notification
-            get().addNotification(
-              "error",
-              `Failed to delete image: ${error.message}`
-            );
-
-            return false;
-          }
-        },
-
-        updateImageMetadata: async (
-          campaignId: string,
-          imageId: string,
-          updates: any
-        ) => {
-          set({ isLoading: true, error: null });
-          try {
-            const result = await campaignsAPI.updateImageMetadata(
-              campaignId,
-              imageId,
-              updates
-            );
-
-            // Update in images list
-            set((state) => ({
-              campaignImages: state.campaignImages.map((img) =>
-                img.id === imageId ? { ...img, ...updates } : img
-              ),
-              // Update active map if it's being modified
-              activeMap:
-                state.activeMap?.id === imageId
-                  ? { ...state.activeMap, ...updates }
-                  : state.activeMap,
-              isLoading: false,
-            }));
-
-            // Add success notification
-            get().addNotification("success", "Image updated successfully");
-
-            return result;
-          } catch (error: any) {
-            set({
-              error: error.message || "Failed to update image metadata",
-              isLoading: false,
-            });
-
-            // Add error notification
-            get().addNotification(
-              "error",
-              `Failed to update image: ${error.message}`
-            );
-
-            return null;
-          }
-        },
-
-        setActiveMap: (image: Image | null) => {
-          set({ activeMap: image });
-
-          if (image) {
-            // Add info notification
-            get().addNotification("info", `Active map set to "${image.name}"`);
-          }
-        },
-
-        shareImage: async (campaignId: string, imageId: string) => {
-          set({ isLoading: true, error: null });
-          try {
-            await campaignsAPI.shareImage(campaignId, imageId);
-
-            // Find image name
-            const imageName =
-              get().campaignImages.find((img) => img.id === imageId)?.name ||
-              "Image";
-
-            // Add notification
-            get().addNotification(
-              "success",
-              `Image "${imageName}" shared with players`
-            );
-
-            set({ isLoading: false });
-            return true;
-          } catch (error: any) {
-            set({
-              error: error.message || "Failed to share image",
-              isLoading: false,
-            });
-
-            // Add error notification
-            get().addNotification(
-              "error",
-              `Failed to share image: ${error.message}`
-            );
-
-            return false;
-          }
-        },
-
-        updateWebSocketStatus: (status: Partial<WebSocketConnectionStatus>) => {
           set((state) => ({
-            wsStatus: {
-              ...state.wsStatus,
-              ...status,
-              lastConnected: status.connected
-                ? new Date().toISOString()
-                : state.wsStatus.lastConnected,
-            },
+            notifications: [notification, ...state.notifications].slice(0, 50), // Keep only 50 latest
           }));
 
-          // Add notification on connection changes
-          if (status.connected !== undefined) {
-            const message = status.connected
-              ? "Connected to game server"
-              : "Disconnected from game server";
-
-            get().addNotification(
-              status.connected ? "success" : "error",
-              message
-            );
-          }
-
-          // Add notification on errors
-          if (status.error && status.error !== get().wsStatus.error) {
-            get().addNotification("error", `WebSocket error: ${status.error}`);
+          // Auto-remove success and info notifications after 5 seconds
+          if (type === "success" || type === "info") {
+            setTimeout(() => {
+              get().removeNotification(notification.id);
+            }, 5000);
           }
         },
 
-        setResourceLock: (lock: LockStatus) => {
-          set((state) => {
-            // Remove any existing lock for this resource
-            const filteredLocks = state.resourceLocks.filter(
-              (l) =>
-                !(
-                  l.resourceType === lock.resourceType &&
-                  l.resourceId === lock.resourceId
-                )
-            );
-
-            // Add the new lock
-            return {
-              resourceLocks: [...filteredLocks, lock],
-            };
-          });
-
-          // Add notification if someone else locked a resource
-          if (lock.lockedBy !== get().currentUser?.id) {
-            // Get resource type for better notification
-            let resourceTypeName = "";
-            switch (lock.resourceType) {
-              case "character":
-                resourceTypeName = "Character";
-                break;
-              case "npc":
-                resourceTypeName = "NPC";
-                break;
-              case "encounter":
-                resourceTypeName = "Encounter";
-                break;
-              case "combat":
-                resourceTypeName = "Combat";
-                break;
-              default:
-                resourceTypeName = lock.resourceType;
-            }
-
-            get().addNotification(
-              "info",
-              `${resourceTypeName} is being edited by another user`
-            );
-          }
-        },
-
-        removeResourceLock: (resourceType: string, resourceId: string) => {
+        removeNotification: (notificationId: string) => {
           set((state) => ({
-            resourceLocks: state.resourceLocks.filter(
-              (lock) =>
-                !(
-                  lock.resourceType === resourceType &&
-                  lock.resourceId === resourceId
-                )
+            notifications: state.notifications.filter(
+              (n) => n.id !== notificationId
             ),
           }));
         },
 
-        isResourceLocked: (
-          resourceType: string,
-          resourceId: string,
-          userId: string
-        ) => {
-          const lock = get().resourceLocks.find(
-            (l) =>
-              l.resourceType === resourceType && l.resourceId === resourceId
-          );
-
-          if (!lock) return false;
-
-          return lock.lockedBy !== userId;
+        markNotificationRead: (notificationId: string) => {
+          set((state) => ({
+            notifications: state.notifications.map((n) =>
+              n.id === notificationId ? { ...n, read: true } : n
+            ),
+          }));
         },
 
-        getResourceLocker: (resourceType: string, resourceId: string) => {
-          const lock = get().resourceLocks.find(
-            (l) =>
-              l.resourceType === resourceType && l.resourceId === resourceId
-          );
+        clearNotifications: () => {
+          set({ notifications: [] });
+        },
 
-          return lock ? lock.lockedBy : null;
+        // ===== UI MANAGEMENT =====
+        setSidebarOpen: (open: boolean) => {
+          set({ sidebarOpen: open });
         },
 
         toggleSidebar: () => {
           set((state) => ({ sidebarOpen: !state.sidebarOpen }));
         },
 
-        setSelectedTab: (
-          tab: "characters" | "npcs" | "combat" | "encounters" | "maps"
-        ) => {
-          set({ selectedTab: tab });
-        },
-
-        addNotification: (
-          type: "info" | "success" | "warning" | "error",
-          message: string
-        ) => {
-          const id = Date.now().toString() + Math.random().toString(36);
-          set((state) => ({
-            notifications: [
-              ...state.notifications,
-              {
-                id,
-                type,
-                message,
-                timestamp: new Date().toISOString(),
-              },
-            ].slice(-5), // Keep only the most recent 5 notifications
-          }));
-
-          // Auto-remove notifications after 5 seconds
-          setTimeout(() => {
-            get().clearNotification(id);
-          }, 5000);
-        },
-
-        clearNotification: (id: string) => {
-          set((state) => ({
-            notifications: state.notifications.filter((n) => n.id !== id),
-          }));
-        },
-
-        clearAllNotifications: () => {
-          set({ notifications: [] });
-        },
-
-        setCurrentUser: (user: User | null) => {
-          set({ currentUser: user });
-
-          // Update isDM status if in a campaign
-          if (user && get().currentCampaign) {
-            const isDM = get().currentCampaign.dm_id === user.id;
-            set({ isUserDM: isDM });
-          } else {
-            set({ isUserDM: false });
-          }
-        },
-
-        loadUserData: async () => {
-          // Called after login to load all user data
-          set({ isLoading: true });
-
-          try {
-            // Fetch campaigns
-            await get().fetchCampaigns();
-
-            // If there are campaigns, select the first one
-            const { campaigns } = get();
-            if (campaigns.length > 0) {
-              const campaign = await get().fetchCampaign(campaigns[0]._id);
-              if (campaign) {
-                get().setCurrentCampaign(campaign);
-              }
-            }
-
-            set({ isLoading: false });
-          } catch (error: any) {
-            set({
-              error: error.message || "Failed to load user data",
-              isLoading: false,
-            });
-            get().addNotification("error", "Failed to load user data");
-          }
-        },
-
+        // ===== UTILITY =====
         resetState: () => {
           set({
-            // Don't reset user or campaign list
+            campaigns: [],
             currentCampaign: null,
-            activePlayers: [],
-            campaignImages: [],
-            activeMap: null,
-            wsStatus: {
-              connected: false,
-              lastConnected: null,
-              error: null,
-            },
-            resourceLocks: [],
-            sidebarOpen: true,
-            selectedTab: "characters",
-            notifications: [],
+            isConnected: false,
+            connectionStatus: "disconnected",
+            lastPing: null,
             isLoading: false,
             error: null,
+            sidebarOpen: false,
+            notifications: [],
           });
+
+          // Clear all campaign change callbacks
+          campaignChangeCallbacks.clear();
         },
 
-        // Store communication functions
         onCampaignChange: (callback: (campaign: Campaign | null) => void) => {
-          campaignChangeCallbacks.push(callback);
-        },
+          campaignChangeCallbacks.add(callback);
 
-        offCampaignChange: (callback: (campaign: Campaign | null) => void) => {
-          const index = campaignChangeCallbacks.indexOf(callback);
-          if (index > -1) {
-            campaignChangeCallbacks.splice(index, 1);
-          }
+          // Return cleanup function
+          return () => {
+            campaignChangeCallbacks.delete(callback);
+          };
         },
       }),
       {
-        name: "game-store",
+        name: "game-storage",
         partialize: (state) => ({
-          // Only persist these values
+          // Only persist campaigns and current campaign
           campaigns: state.campaigns,
           currentCampaign: state.currentCampaign,
           sidebarOpen: state.sidebarOpen,
-          selectedTab: state.selectedTab,
         }),
       }
-    )
+    ),
+    {
+      name: "game-store",
+    }
   )
 );
+
+// ===== HELPER HOOKS =====
+
+/**
+ * Hook for campaign-specific operations
+ */
+export function useCampaignActions() {
+  const {
+    fetchCampaigns,
+    fetchCampaign,
+    createCampaign,
+    updateCampaign,
+    deleteCampaign,
+    setCurrentCampaign,
+  } = useGameStore();
+
+  return {
+    fetchCampaigns,
+    fetchCampaign,
+    createCampaign,
+    updateCampaign,
+    deleteCampaign,
+    setCurrentCampaign,
+  };
+}
+
+/**
+ * Hook for connection status
+ */
+export function useConnectionStatus() {
+  const {
+    isConnected,
+    connectionStatus,
+    lastPing,
+    setConnectionStatus,
+    setConnected,
+    updatePing,
+  } = useGameStore();
+
+  return {
+    isConnected,
+    connectionStatus,
+    lastPing,
+    setConnectionStatus,
+    setConnected,
+    updatePing,
+  };
+}
+
+/**
+ * Hook for notifications
+ */
+export function useNotifications() {
+  const {
+    notifications,
+    addNotification,
+    removeNotification,
+    markNotificationRead,
+    clearNotifications,
+  } = useGameStore();
+
+  const unreadCount = notifications.filter((n) => !n.read).length;
+
+  return {
+    notifications,
+    unreadCount,
+    addNotification,
+    removeNotification,
+    markNotificationRead,
+    clearNotifications,
+  };
+}
+
+/**
+ * Hook for UI state
+ */
+export function useUIState() {
+  const { sidebarOpen, setSidebarOpen, toggleSidebar } = useGameStore();
+
+  return {
+    sidebarOpen,
+    setSidebarOpen,
+    toggleSidebar,
+  };
+}
 
 export default useGameStore;

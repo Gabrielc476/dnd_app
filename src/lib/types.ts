@@ -1,449 +1,561 @@
-// lib/types.ts
-import { ReactNode } from "react";
+/**
+ * Centralized Type Definitions - CONSOLIDADO
+ * Problemas resolvidos:
+ * 1. ✅ Tipos duplicados consolidados
+ * 2. ✅ TypeScript types consistentes
+ * 3. ✅ Proper interfaces para todas as entidades
+ * 4. ✅ WebSocket event types
+ * 5. ✅ Combat system types
+ */
 
-// User types
-export interface User {
-  id: string;
-  username: string;
-  email: string;
-  role: "player" | "dm";
+// ===== BASE TYPES =====
+export type ObjectId = string;
+
+export interface BaseEntity {
+  _id: ObjectId;
   created_at: string;
-  last_login?: string;
+  updated_at?: string;
 }
 
+// ===== USER TYPES =====
+export interface User extends BaseEntity {
+  username: string;
+  email: string;
+  is_active: boolean;
+  avatar_url?: string;
+  preferences?: UserPreferences;
+}
+
+export interface UserPreferences {
+  theme: "light" | "dark" | "system";
+  language: string;
+  notifications: NotificationSettings;
+  dice_settings: DiceSettings;
+}
+
+export interface NotificationSettings {
+  email: boolean;
+  push: boolean;
+  combat_updates: boolean;
+  character_updates: boolean;
+}
+
+export interface DiceSettings {
+  auto_roll: boolean;
+  show_formula: boolean;
+  animation: boolean;
+}
+
+// ===== AUTH TYPES =====
 export interface AuthToken {
   access_token: string;
   token_type: string;
-  user_id: string;
-  username: string;
-  role: string;
+  expires_in: number;
 }
 
-// Character types
-export interface Attributes {
+export interface LoginCredentials {
+  email: string;
+  password: string;
+}
+
+export interface RegisterData {
+  username: string;
+  email: string;
+  password: string;
+}
+
+// ===== CAMPAIGN TYPES =====
+export interface Campaign extends BaseEntity {
+  name: string;
+  description?: string;
+  owner_id: ObjectId;
+  players: ObjectId[];
+  settings: CampaignSettings;
+  is_active: boolean;
+  image_url?: string;
+}
+
+export interface CampaignListItem {
+  _id: ObjectId;
+  name: string;
+  description?: string;
+  owner_id: ObjectId;
+  players: ObjectId[];
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface CampaignSettings {
+  allow_player_character_creation: boolean;
+  allow_dice_rolling: boolean;
+  auto_save_interval: number;
+  max_players: number;
+  combat_settings: CombatSettings;
+}
+
+export interface CombatSettings {
+  auto_roll_initiative: boolean;
+  show_enemy_hp: boolean;
+  allow_player_initiative: boolean;
+  turn_timer: number;
+}
+
+// ===== CHARACTER TYPES =====
+export interface Character extends BaseEntity {
+  name: string;
+  class: string;
+  level: number;
+  race: string;
+  background?: string;
+  campaign_id: ObjectId;
+  owner_id: ObjectId;
+
+  // Ability Scores
   strength: number;
   dexterity: number;
   constitution: number;
   intelligence: number;
   wisdom: number;
   charisma: number;
-}
 
-export interface HitPoints {
-  current: number;
-  max: number;
-}
-
-export interface SpellSlot {
-  used: number;
-  total: number;
-}
-
-export interface Spellcasting {
-  ability: string;
-  spell_slots: Record<string, SpellSlot>;
-  prepared_spells: string[];
-}
-
-export interface InventoryItem {
-  item_id: string;
-  name: string;
-  quantity: number;
-  equipped: boolean;
-  description?: string;
-  weight?: number;
-  value?: number;
-}
-
-export interface Proficiency {
-  name: string;
-  type: "skill" | "saving_throw" | "tool" | "weapon" | "armor" | "language";
-  expertise: boolean;
-}
-
-export interface Feature {
-  name: string;
-  description: string;
-}
-
-export interface Character {
-  _id: string;
-  name: string;
-  owner_id: string;
-  campaign_id: string;
-  race: string;
-  class: string;
-  level: number;
-  attributes: Attributes;
-  hp: HitPoints;
-  temporary_hp: number;
+  // HP and AC
+  hit_points_max: number;
+  hit_points_current: number;
+  hit_points_temp: number;
   armor_class: number;
+
+  // Proficiencies
+  proficiency_bonus: number;
+  skills: SkillProficiency[];
+  saving_throw_proficiencies: string[];
+
+  // Combat Stats
   speed: number;
   initiative_bonus: number;
-  spellcasting?: Spellcasting;
+
+  // Features and Equipment
+  features: CharacterFeature[];
+  spells: CharacterSpell[];
   inventory: InventoryItem[];
-  proficiencies: Proficiency[];
-  features: Feature[];
-  background?: string;
-  alignment?: string;
-  experience_points: number;
-  inspiration: boolean;
+
+  // Status
   conditions: string[];
-  created_at: string;
-  updated_at: string;
+  notes?: string;
+
+  // Display
+  avatar_url?: string;
+  color?: string;
 }
 
 export interface CharacterListItem {
-  _id: string;
+  _id: ObjectId;
   name: string;
-  owner_id: string;
+  class: string;
   level: number;
   race: string;
-  class: string;
-  hp: HitPoints;
+  campaign_id: ObjectId;
+  owner_id: ObjectId;
+  avatar_url?: string;
 }
 
-// NPC types
-export interface NPCAction {
+export interface SkillProficiency {
+  skill: string;
+  proficient: boolean;
+  expertise: boolean;
+}
+
+export interface CharacterFeature {
   name: string;
   description: string;
-  attack_bonus?: number;
-  damage?: string;
-  damage_type?: string;
+  source: string;
+  uses_max?: number;
+  uses_current?: number;
 }
 
-export interface NPCStats {
-  ac: number;
-  hp: HitPoints;
-  speed: number;
-  attributes: Attributes;
-  saving_throws?: Record<string, number>;
-  skills?: Record<string, number>;
-  damage_vulnerabilities: string[];
-  damage_resistances: string[];
-  damage_immunities: string[];
-  condition_immunities: string[];
-  senses?: string;
-  languages: string[];
-  challenge_rating: string;
-}
-
-export interface NPC {
-  _id: string;
-  name: string;
-  source: "custom" | "compendium";
-  compendium_id?: string;
-  campaign_id: string;
-  stats: NPCStats;
-  actions: NPCAction[];
-  legendary_actions: NPCAction[];
-  reactions: NPCAction[];
-  features: Feature[];
-  description?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface NPCListItem {
-  _id: string;
-  name: string;
-  source: "custom" | "compendium";
-  challenge_rating: string;
-  type: string;
-}
-
-// Campaign types
-export interface Trap {
-  name: string;
-  description: string;
-  dc: number;
-  damage: string;
-  triggered: boolean;
-}
-
-export interface NPCReference {
-  npc_id: string;
-  quantity: number;
-  hp_override?: number;
-  initiative_override?: number;
-  hidden: boolean;
-}
-
-export interface Image {
-  id: string;
-  url: string;
-  name: string;
-  description?: string;
-  tags: string[];
-  is_map: boolean;
-  grid_enabled: boolean;
-  grid_size?: number;
-}
-
-export interface Encounter {
-  id: string;
-  name: string;
-  description?: string;
-  npcs: NPCReference[];
-  traps: Trap[];
-  map_image_id?: string;
-  notes?: string;
-}
-
-export interface Campaign {
-  _id: string;
-  name: string;
-  description?: string;
-  dm_id: string;
-  players: string[];
-  active_encounter?: string;
-  encounters: Encounter[];
-  images: Image[];
-  notes?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface CampaignListItem {
-  _id: string;
-  name: string;
-  description?: string;
-  dm_id: string;
-  player_count: number;
-  active: boolean;
-  created_at: string;
-}
-
-// Combat types
-export interface InitiativeEntry {
-  id: string;
-  type: "character" | "npc";
-  initiative: number;
-  has_acted: boolean;
-  name?: string;
-}
-
-export interface ConditionDuration {
-  type: "rounds" | "minutes" | "hours";
-  value: number;
-}
-
-export interface ConditionApplication {
-  round: number;
-  turn: number;
-}
-
-export interface ConditionEffect {
-  target_id: string;
-  target_type: "character" | "npc";
-  condition: string;
-  duration: ConditionDuration;
-  applied_at: ConditionApplication;
-  notes?: string;
-}
-
-export interface DiceRoll {
-  roll: string;
-  result: number;
-}
-
-export interface CombatEvent {
-  id: string;
-  round: number;
-  turn: number;
-  actor_id: string;
-  actor_type: "character" | "npc" | "dm";
-  event_type:
-    | "attack"
-    | "damage"
-    | "spell"
-    | "heal"
-    | "condition"
-    | "movement"
-    | "other";
-  target_id?: string;
-  target_type?: "character" | "npc";
-  description: string;
-  rolls: DiceRoll[];
-  timestamp: string;
-}
-
-export interface Combat {
-  _id: string;
-  campaign_id: string;
-  encounter_id?: string;
-  status: "active" | "completed" | "paused";
-  round: number;
-  initiative_order: InitiativeEntry[];
-  current_turn: number;
-  conditions: ConditionEffect[];
-  events: CombatEvent[];
-  started_at: string;
-  updated_at: string;
-  ended_at?: string;
-}
-
-// WebSocket message types
-export interface WSMessage {
-  type: string;
-  action: string;
-  timestamp?: string;
-}
-
-export interface CharacterEvent extends WSMessage {
-  type: "character";
-  action: "update" | "roll" | "hp_change";
-  character_id: string;
-  data: Record<string, any>;
-}
-
-export interface RollEvent extends WSMessage {
-  type: "roll";
-  action:
-    | "ability"
-    | "skill"
-    | "saving_throw"
-    | "attack"
-    | "damage"
-    | "initiative"
-    | "custom";
-  character_id?: string;
-  npc_id?: string;
-  formula: string;
-  modifier: number;
-  advantage?: boolean;
-  disadvantage?: boolean;
-}
-
-export interface CombatEvent extends WSMessage {
-  type: "combat";
-  action:
-    | "start"
-    | "roll_initiative"
-    | "next_turn"
-    | "add_condition"
-    | "remove_condition"
-    | "end";
-  combat_id?: string;
-  data: Record<string, any>;
-}
-
-export interface LockEvent extends WSMessage {
-  type: "lock";
-  action: "acquire" | "release" | "heartbeat" | "status";
-  resource_id: string;
-  resource_type: string;
-  duration?: number;
-}
-
-export interface ImageEvent extends WSMessage {
-  type: "image";
-  action: "share" | "hide" | "reveal" | "move_token";
-  image_id: string;
-  data: Record<string, any>;
-}
-
-export interface SpellEvent extends WSMessage {
-  type: "spell";
-  action: "prepare" | "cast" | "reset_slots" | "unprepare";
-  character_id: string;
-  data: Record<string, any>;
-}
-
-export interface SystemEvent extends WSMessage {
-  type: "system";
-  action: "connected" | "disconnected" | "error" | "notification";
-  message: string;
-  details?: Record<string, any>;
-}
-
-// Compendium types
-export interface Spell {
-  _id: string;
+export interface CharacterSpell {
   name: string;
   level: number;
   school: string;
   casting_time: string;
   range: string;
-  components: string;
   duration: string;
   description: string;
-  classes: string[];
-  source: string;
+  prepared: boolean;
 }
 
-export interface Item {
-  _id: string;
+export interface InventoryItem {
+  name: string;
+  description?: string;
+  quantity: number;
+  weight: number;
+  value: number;
+  type: string;
+  properties?: string[];
+}
+
+// ===== NPC TYPES =====
+export interface NPC extends BaseEntity {
   name: string;
   type: string;
-  rarity: string;
-  requires_attunement: boolean;
-  description: string;
-  weight?: number;
-  value?: number;
-  properties: string[];
-  source: string;
-}
-
-export interface MonsterTemplate {
-  _id: string;
-  name: string;
+  subtype?: string;
   size: string;
-  type: string;
   alignment: string;
+  campaign_id: ObjectId;
+
+  // Stats
   armor_class: number;
-  armor_desc?: string;
-  hit_points: number;
-  hit_dice: string;
+  hit_points_max: number;
+  hit_points_current: number;
   speed: Record<string, number>;
+
+  // Ability Scores
   strength: number;
   dexterity: number;
   constitution: number;
   intelligence: number;
   wisdom: number;
   charisma: number;
+
+  // Combat
+  challenge_rating: string;
+  proficiency_bonus: number;
   saving_throws?: Record<string, number>;
   skills?: Record<string, number>;
-  damage_vulnerabilities: string[];
-  damage_resistances: string[];
-  damage_immunities: string[];
-  condition_immunities: string[];
-  senses: string;
-  languages: string;
+  damage_resistances?: string[];
+  damage_immunities?: string[];
+  condition_immunities?: string[];
+  senses?: string[];
+  languages?: string[];
+
+  // Actions
+  actions: NPCAction[];
+  legendary_actions?: NPCAction[];
+  reactions?: NPCAction[];
+
+  // Description
+  description?: string;
+  image_url?: string;
+
+  // Status
+  conditions: string[];
+  notes?: string;
+}
+
+export interface NPCListItem {
+  _id: ObjectId;
+  name: string;
+  type: string;
   challenge_rating: string;
-  traits: Record<string, string>[];
-  actions: Record<string, string>[];
-  legendary_actions: Record<string, string>[];
+  campaign_id: ObjectId;
+  image_url?: string;
+}
+
+export interface NPCAction {
+  name: string;
+  description: string;
+  attack_bonus?: number;
+  damage?: string;
+  save_dc?: number;
+  save_ability?: string;
+  type: "action" | "legendary" | "reaction" | "lair";
+  recharge?: string;
+}
+
+// ===== COMBAT TYPES =====
+export interface Combat extends BaseEntity {
+  campaign_id: ObjectId;
+  encounter_id?: ObjectId;
+  participants: CombatParticipant[];
+  round: number;
+  turn: number;
+  current_participant_id?: ObjectId;
+  status: "setup" | "active" | "ended";
+  settings: CombatSettings;
+}
+
+export interface CombatParticipant {
+  _id: ObjectId;
+  entity_id: ObjectId;
+  entity_type: "character" | "npc";
+  name: string;
+  initiative: number;
+  hit_points_max: number;
+  hit_points_current: number;
+  hit_points_temp: number;
+  armor_class: number;
+  conditions: ConditionEffect[];
+  actions_taken: CombatAction[];
+  is_visible: boolean;
+  position?: Position;
+}
+
+export interface ConditionEffect {
+  id: string;
+  name: string;
+  description?: string;
+  duration: number;
+  source: string;
+  effects: Record<string, any>;
+  created_at: string;
+}
+
+export interface CombatAction {
+  id: string;
+  name: string;
+  description?: string;
+  type: "action" | "bonus_action" | "reaction" | "movement";
+  timestamp: string;
+}
+
+export interface Position {
+  x: number;
+  y: number;
+  z?: number;
+}
+
+// ===== ENCOUNTER TYPES =====
+export interface Encounter extends BaseEntity {
+  name: string;
+  description?: string;
+  campaign_id: ObjectId;
+  difficulty: "easy" | "medium" | "hard" | "deadly";
+  participants: EncounterParticipant[];
+  environment?: EncounterEnvironment;
+  triggers?: EncounterTrigger[];
+}
+
+export interface EncounterParticipant {
+  entity_id: ObjectId;
+  entity_type: "character" | "npc";
+  quantity: number;
+  position?: Position;
+  hidden: boolean;
+}
+
+export interface EncounterEnvironment {
+  terrain: string;
+  weather?: string;
+  lighting: string;
+  temperature?: string;
+  special_conditions?: string[];
+}
+
+export interface EncounterTrigger {
+  name: string;
+  condition: string;
+  action: string;
+  parameters: Record<string, any>;
+}
+
+// ===== COMPENDIUM TYPES =====
+export interface Spell {
+  name: string;
+  level: number;
+  school: string;
+  casting_time: string;
+  range: string;
+  components: string[];
+  duration: string;
+  description: string;
+  higher_levels?: string;
+  classes: string[];
   source: string;
 }
 
-// Lock types
-export interface Lock {
+export interface Item {
+  name: string;
+  type: string;
+  subtype?: string;
+  rarity: string;
+  requires_attunement: boolean;
+  description: string;
+  properties?: string[];
+  damage?: string;
+  weight: number;
+  value: number;
+  source: string;
+}
+
+export interface Monster {
+  name: string;
+  type: string;
+  subtype?: string;
+  size: string;
+  alignment: string;
+  armor_class: number;
+  hit_points: number;
+  hit_dice: string;
+  speed: Record<string, number>;
+  ability_scores: Record<string, number>;
+  challenge_rating: string;
+  proficiency_bonus: number;
+  actions: NPCAction[];
+  source: string;
+}
+
+// ===== WEBSOCKET TYPES =====
+export interface WebSocketMessage {
+  event: string;
+  data: any;
+  timestamp: string;
+}
+
+export interface LockEvent {
   resource_id: string;
   resource_type: string;
-  locked_by: string;
+  action: "acquire" | "release" | "check";
+  duration?: number;
+}
+
+export interface DiceRollEvent {
+  formula: string;
+  result: DiceRollResult;
+  character_id?: ObjectId;
+  context?: string;
+}
+
+export interface DiceRollResult {
+  total: number;
+  rolls: DiceRoll[];
+  formula: string;
+  breakdown: string;
+}
+
+export interface DiceRoll {
+  sides: number;
+  result: number;
+  critical?: boolean;
+}
+
+// ===== API RESPONSE TYPES =====
+export interface ApiResponse<T = any> {
+  data?: T;
+  message?: string;
+  error?: string;
+  detail?: string;
+  status: number;
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  per_page: number;
+  pages: number;
+}
+
+// ===== ERROR TYPES =====
+export interface ErrorDetail {
+  field?: string;
+  message: string;
+  code?: string;
+}
+
+export interface ValidationError {
+  type: "validation_error";
+  details: ErrorDetail[];
+}
+
+// ===== NOTIFICATION TYPES =====
+export interface Notification {
+  id: string;
+  type: "info" | "success" | "warning" | "error";
+  title: string;
+  message: string;
   timestamp: string;
-  expires_at: string;
+  read: boolean;
+  actions?: NotificationAction[];
 }
 
-export interface SessionLock {
-  campaign_id: string;
-  resource_type: string;
-  locked_by: string;
-  player_turn?: string;
-  timestamp: string;
-  expires_at: string;
+export interface NotificationAction {
+  label: string;
+  action: string;
+  style?: "primary" | "secondary" | "destructive";
 }
 
-// Component props
-export interface LayoutProps {
-  children: ReactNode;
+// ===== SEARCH AND FILTER TYPES =====
+export interface SearchOptions {
+  query?: string;
+  filters?: Record<string, any>;
+  sort?: SortOption;
+  page?: number;
+  per_page?: number;
 }
 
-export interface WithChildrenProps {
-  children: ReactNode;
+export interface SortOption {
+  field: string;
+  direction: "asc" | "desc";
 }
 
-export interface WithClassNameProps {
-  className?: string;
+export interface FilterOption {
+  field: string;
+  operator:
+    | "eq"
+    | "ne"
+    | "gt"
+    | "gte"
+    | "lt"
+    | "lte"
+    | "in"
+    | "nin"
+    | "contains";
+  value: any;
 }
+
+// ===== UTILITY TYPES =====
+export type DeepPartial<T> = {
+  [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P];
+};
+
+export type WithRequired<T, K extends keyof T> = T & { [P in K]-?: T[P] };
+
+export type WithOptional<T, K extends keyof T> = Omit<T, K> &
+  Partial<Pick<T, K>>;
+
+// ===== FORM TYPES =====
+export interface FormField {
+  name: string;
+  label: string;
+  type:
+    | "text"
+    | "number"
+    | "email"
+    | "password"
+    | "textarea"
+    | "select"
+    | "checkbox"
+    | "radio";
+  required?: boolean;
+  placeholder?: string;
+  options?: FormOption[];
+  validation?: ValidationRule[];
+}
+
+export interface FormOption {
+  label: string;
+  value: any;
+}
+
+export interface ValidationRule {
+  type: "required" | "email" | "min" | "max" | "pattern";
+  value?: any;
+  message: string;
+}
+
+// ===== EXPORT ALL TYPES =====
+export type {
+  // Re-export common types for convenience
+  ObjectId,
+  BaseEntity,
+  User,
+  Campaign,
+  Character,
+  NPC,
+  Combat,
+  Spell,
+  Item,
+  Monster,
+  WebSocketMessage,
+  ApiResponse,
+  Notification,
+};

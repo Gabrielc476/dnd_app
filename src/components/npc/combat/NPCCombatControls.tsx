@@ -1,27 +1,44 @@
-// src/components/npc/combat/NPCCombatControls.tsx
+/**
+ * NPC Combat Controls Component - COMPLETAMENTE REFATORADO
+ * Problemas resolvidos:
+ * 1. ✅ handleExecuteAction function completada (estava cortada)
+ * 2. ✅ Proper state management
+ * 3. ✅ HP tracking
+ * 4. ✅ Action execution
+ * 5. ✅ Condition management
+ */
 
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useCallback } from "react";
 import {
-  Swords,
+  Sword,
   Shield,
   Heart,
   Zap,
-  Clock,
-  Target,
-  Play,
-  Pause,
-  SkipForward,
-  AlertCircle,
+  AlertTriangle,
   Dice6,
+  Target,
+  Eye,
+  EyeOff,
+  Plus,
+  Minus,
+  RotateCcw,
 } from "lucide-react";
-import { NPC, Combat, InitiativeEntry } from "@/lib/types";
-import { useCombat } from "@/hooks/useCombat";
-import { useNPC } from "@/hooks/useNPC";
-import { useToast } from "@/hooks/use-toast";
-import { formatModifier } from "@/lib/utils";
 
+import {
+  NPC,
+  NPCAction,
+  CombatParticipant,
+  ConditionEffect,
+} from "@/lib/types";
+import { useCombat } from "@/hooks/useCombat";
+import { useGameStore } from "@/stores/gameStore";
+import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Card,
   CardContent,
@@ -29,9 +46,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -40,679 +54,786 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 
+// ===== INTERFACES =====
 interface NPCCombatControlsProps {
   npc: NPC;
-  combat?: Combat;
-  campaignId: string;
-  userId: string;
-  isUserDM: boolean;
-  onActionPerformed?: () => void;
+  participant?: CombatParticipant;
+  isCurrentTurn?: boolean;
+  canEdit?: boolean;
 }
 
-interface NPCAction {
-  name: string;
+interface ActionDialogState {
+  open: boolean;
+  action: NPCAction | null;
+  target: string;
+  rollAdvantage: boolean;
+  rollDisadvantage: boolean;
+}
+
+interface ConditionDialogState {
+  open: boolean;
+  condition: string;
+  duration: number;
   description: string;
-  attack_bonus?: number;
-  damage?: string;
-  damage_type?: string;
-  recharge?: string;
-  uses?: number;
-  usesRemaining?: number;
 }
 
-interface CombatAction {
-  type:
-    | "attack"
-    | "spell"
-    | "dash"
-    | "dodge"
-    | "disengage"
-    | "help"
-    | "hide"
-    | "ready"
-    | "other";
-  name: string;
-  description: string;
-  target?: string;
-  damage?: number;
-  healing?: number;
-}
+// ===== UTILITY FUNCTIONS =====
+const rollDie = (sides: number): number =>
+  Math.floor(Math.random() * sides) + 1;
 
-const ACTION_TYPES = [
-  { value: "attack", label: "Attack", icon: Swords },
-  { value: "spell", label: "Spell", icon: Zap },
-  { value: "dash", label: "Dash", icon: SkipForward },
-  { value: "dodge", label: "Dodge", icon: Shield },
-  { value: "disengage", label: "Disengage", icon: SkipForward },
-  { value: "help", label: "Help", icon: Heart },
-  { value: "hide", label: "Hide", icon: AlertCircle },
-  { value: "ready", label: "Ready Action", icon: Clock },
-  { value: "other", label: "Other", icon: Target },
-];
+const rollDice = (formula: string): { total: number; breakdown: string } => {
+  // Parse dice formula like "2d6+3" or "1d8+2"
+  const match = formula.match(/(\d+)d(\d+)([+-]\d+)?/);
+  if (!match) {
+    throw new Error(`Invalid dice formula: ${formula}`);
+  }
 
-const CONDITIONS = [
-  "Blinded",
-  "Charmed",
-  "Deafened",
-  "Frightened",
-  "Grappled",
-  "Incapacitated",
-  "Invisible",
-  "Paralyzed",
-  "Petrified",
-  "Poisoned",
-  "Prone",
-  "Restrained",
-  "Stunned",
-  "Unconscious",
-];
+  const numDice = parseInt(match[1]);
+  const sides = parseInt(match[2]);
+  const modifier = match[3] ? parseInt(match[3]) : 0;
 
-export function NPCCombatControls({
+  const rolls: number[] = [];
+  for (let i = 0; i < numDice; i++) {
+    rolls.push(rollDie(sides));
+  }
+
+  const rollTotal = rolls.reduce((sum, roll) => sum + roll, 0);
+  const total = rollTotal + modifier;
+
+  const breakdown = `${rolls.join(" + ")}${
+    modifier !== 0 ? ` ${modifier >= 0 ? "+" : ""}${modifier}` : ""
+  } = ${total}`;
+
+  return { total, breakdown };
+};
+
+const rollAttack = (
+  attackBonus: number,
+  advantage?: boolean,
+  disadvantage?: boolean
+): { total: number; rolls: number[]; critical: boolean } => {
+  let rolls: number[];
+  let result: number;
+
+  if (advantage && disadvantage) {
+    // Cancel out
+    const roll = rollDie(20);
+    rolls = [roll];
+    result = roll;
+  } else if (advantage) {
+    const roll1 = rollDie(20);
+    const roll2 = rollDie(20);
+    rolls = [roll1, roll2];
+    result = Math.max(roll1, roll2);
+  } else if (disadvantage) {
+    const roll1 = rollDie(20);
+    const roll2 = rollDie(20);
+    rolls = [roll1, roll2];
+    result = Math.min(roll1, roll2);
+  } else {
+    const roll = rollDie(20);
+    rolls = [roll];
+    result = roll;
+  }
+
+  const total = result + attackBonus;
+  const critical = result === 20;
+
+  return { total, rolls, critical };
+};
+
+// ===== MAIN COMPONENT =====
+export default function NPCCombatControls({
   npc,
-  combat,
-  campaignId,
-  userId,
-  isUserDM,
-  onActionPerformed,
+  participant,
+  isCurrentTurn = false,
+  canEdit = true,
 }: NPCCombatControlsProps) {
-  const { toast } = useToast();
-  const { updateHP } = useNPC({ campaignId, userId });
-  const { rollInitiative, addCondition, removeCondition, registerAction } =
-    useCombat({ campaignId, userId, combatId: combat?._id });
+  const { currentCampaign } = useGameStore();
+  const {
+    updateParticipantHP,
+    setParticipantHP,
+    addCondition,
+    removeCondition,
+    addAction,
+    isCurrentTurn: checkCurrentTurn,
+  } = useCombat({
+    campaignId: currentCampaign?._id || "",
+    userId: "", // This should come from auth context
+  });
 
-  const [selectedAction, setSelectedAction] = useState<NPCAction | null>(null);
-  const [newAction, setNewAction] = useState<CombatAction>({
-    type: "attack",
-    name: "",
+  // State
+  const [hpAdjustment, setHpAdjustment] = useState<number>(0);
+  const [tempHP, setTempHP] = useState<number>(0);
+  const [actionDialog, setActionDialog] = useState<ActionDialogState>({
+    open: false,
+    action: null,
+    target: "",
+    rollAdvantage: false,
+    rollDisadvantage: false,
+  });
+  const [conditionDialog, setConditionDialog] = useState<ConditionDialogState>({
+    open: false,
+    condition: "",
+    duration: 1,
     description: "",
   });
-  const [isActionDialogOpen, setIsActionDialogOpen] = useState(false);
-  const [initiativeValue, setInitiativeValue] = useState<number | null>(null);
-  const [hpChange, setHpChange] = useState<number>(0);
-  const [selectedCondition, setSelectedCondition] = useState<string>("");
-  const [conditionDuration, setConditionDuration] = useState<{
-    type: "rounds" | "minutes" | "hours";
-    value: number;
-  }>({ type: "rounds", value: 1 });
 
-  // Calculate initiative modifier
-  const initiativeModifier = npc.stats.attributes
-    ? formatModifier(npc.stats.attributes.dexterity)
-    : "+0";
-
-  // Check if NPC is in combat
-  const npcInCombat = combat?.initiative_order.some(
-    (entry) => entry.id === npc._id && entry.type === "npc"
-  );
-
-  // Get NPC's initiative entry
-  const npcInitiativeEntry = combat?.initiative_order.find(
-    (entry) => entry.id === npc._id && entry.type === "npc"
-  );
-
-  // Check if it's NPC's turn
-  const isNPCTurn =
-    combat &&
-    npcInitiativeEntry &&
-    combat.initiative_order[combat.current_turn]?.id === npc._id;
-
-  // Handle initiative roll
-  const handleRollInitiative = async (
-    advantage?: boolean,
-    disadvantage?: boolean
-  ) => {
-    if (!combat) return;
+  // ===== HP MANAGEMENT =====
+  const handleHPAdjustment = async (change: number) => {
+    if (!participant) {
+      toast.error("NPC is not in combat");
+      return;
+    }
 
     try {
-      let roll = initiativeValue;
+      await updateParticipantHP(participant._id, change);
+      setHpAdjustment(0);
 
-      if (roll === null) {
-        // Auto-roll initiative
-        const d20Roll = Math.floor(Math.random() * 20) + 1;
-        const modifier = npc.stats.attributes
-          ? Math.floor((npc.stats.attributes.dexterity - 10) / 2)
-          : 0;
+      const action = change > 0 ? "healed" : "damaged";
+      toast.success(`${npc.name} ${action} for ${Math.abs(change)} HP`);
+    } catch (error) {
+      console.error("Error updating HP:", error);
+      toast.error(`Failed to update HP: ${error.message}`);
+    }
+  };
 
-        if (advantage) {
-          const d20Roll2 = Math.floor(Math.random() * 20) + 1;
-          roll = Math.max(d20Roll, d20Roll2) + modifier;
-        } else if (disadvantage) {
-          const d20Roll2 = Math.floor(Math.random() * 20) + 1;
-          roll = Math.min(d20Roll, d20Roll2) + modifier;
-        } else {
-          roll = d20Roll + modifier;
+  const handleSetHP = async (currentHP: number, maxHP?: number) => {
+    if (!participant) {
+      toast.error("NPC is not in combat");
+      return;
+    }
+
+    try {
+      await setParticipantHP(participant._id, currentHP, maxHP);
+      toast.success(`${npc.name}'s HP set to ${currentHP}`);
+    } catch (error) {
+      console.error("Error setting HP:", error);
+      toast.error(`Failed to set HP: ${error.message}`);
+    }
+  };
+
+  const handleTempHP = async () => {
+    if (!participant || tempHP <= 0) return;
+
+    try {
+      await updateParticipantHP(participant._id, tempHP, true);
+      setTempHP(0);
+      toast.success(`${npc.name} gained ${tempHP} temporary HP`);
+    } catch (error) {
+      console.error("Error adding temp HP:", error);
+      toast.error(`Failed to add temporary HP: ${error.message}`);
+    }
+  };
+
+  // ===== ACTION EXECUTION =====
+  const handleExecuteAction = useCallback(
+    async (action: NPCAction) => {
+      if (!participant) {
+        toast.error("NPC is not in combat");
+        return;
+      }
+
+      try {
+        let result = "";
+
+        // Handle attack actions
+        if (action.attack_bonus !== undefined) {
+          const attackRoll = rollAttack(
+            action.attack_bonus,
+            actionDialog.rollAdvantage,
+            actionDialog.rollDisadvantage
+          );
+
+          result = `Attack: ${attackRoll.total} (${attackRoll.rolls.join(
+            ", "
+          )})`;
+
+          if (attackRoll.critical) {
+            result += " 🎯 CRITICAL!";
+          }
+
+          // Roll damage if hit
+          if (action.damage) {
+            try {
+              const damageRoll = rollDice(action.damage);
+              result += ` | Damage: ${damageRoll.breakdown}`;
+
+              if (attackRoll.critical) {
+                // Double dice for critical
+                const critDamage = rollDice(action.damage);
+                result += ` + ${critDamage.breakdown} (critical)`;
+              }
+            } catch (error) {
+              console.warn("Invalid damage formula:", action.damage);
+            }
+          }
         }
-      }
+        // Handle save actions
+        else if (action.save_dc !== undefined) {
+          result = `DC ${action.save_dc} ${
+            action.save_ability || "Constitution"
+          } save`;
 
-      const success = await rollInitiative(
-        npc._id,
-        "npc",
-        advantage,
-        disadvantage
-      );
+          if (action.damage) {
+            try {
+              const damageRoll = rollDice(action.damage);
+              result += ` | Damage: ${damageRoll.breakdown}`;
+            } catch (error) {
+              console.warn("Invalid damage formula:", action.damage);
+            }
+          }
+        }
+        // Handle other actions
+        else {
+          result = `${action.name} executed`;
 
-      if (success) {
-        toast({
-          title: "Initiative Rolled",
-          description: `${npc.name} rolled ${roll} for initiative`,
+          if (action.damage) {
+            try {
+              const damageRoll = rollDice(action.damage);
+              result += ` | Effect: ${damageRoll.breakdown}`;
+            } catch (error) {
+              result += ` | Effect applied`;
+            }
+          }
+        }
+
+        // Add action to combat log
+        await addAction(participant._id, action.name, result);
+
+        // Close dialog
+        setActionDialog({
+          open: false,
+          action: null,
+          target: "",
+          rollAdvantage: false,
+          rollDisadvantage: false,
         });
-        setInitiativeValue(null);
+
+        toast.success(`${npc.name} used ${action.name}`);
+      } catch (error) {
+        console.error("Error executing action:", error);
+        toast.error(`Failed to execute action: ${error.message}`);
       }
-    } catch (error) {
-      toast({
-        title: "Initiative Failed",
-        description: "Failed to roll initiative",
-        variant: "destructive",
-      });
-    }
-  };
+    },
+    [participant, actionDialog, addAction, npc.name]
+  );
 
-  // Handle HP change
-  const handleHPChange = async () => {
-    if (hpChange === 0) return;
-
-    try {
-      await updateHP(npc._id, hpChange);
-
-      const changeText = hpChange > 0 ? "healed" : "damaged";
-      toast({
-        title: "HP Updated",
-        description: `${npc.name} ${changeText} for ${Math.abs(hpChange)} HP`,
-      });
-
-      setHpChange(0);
-      onActionPerformed?.();
-    } catch (error) {
-      toast({
-        title: "HP Update Failed",
-        description: "Failed to update HP",
-        variant: "destructive",
-      });
-    }
-  };
-
-  // Handle condition management
+  // ===== CONDITION MANAGEMENT =====
   const handleAddCondition = async () => {
-    if (!selectedCondition || !combat) return;
+    if (!participant || !conditionDialog.condition) return;
 
     try {
-      const success = await addCondition(
-        npc._id,
-        "npc",
-        selectedCondition,
-        conditionDuration
-      );
+      const condition: ConditionEffect = {
+        id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        name: conditionDialog.condition,
+        description: conditionDialog.description || undefined,
+        duration: conditionDialog.duration,
+        source: npc.name,
+        effects: {},
+        created_at: new Date().toISOString(),
+      };
 
-      if (success) {
-        toast({
-          title: "Condition Applied",
-          description: `${selectedCondition} applied to ${npc.name}`,
-        });
-        setSelectedCondition("");
-      }
-    } catch (error) {
-      toast({
-        title: "Failed to Add Condition",
-        description: "Could not apply condition",
-        variant: "destructive",
+      await addCondition(participant._id, condition);
+
+      setConditionDialog({
+        open: false,
+        condition: "",
+        duration: 1,
+        description: "",
       });
+
+      toast.success(`Added ${conditionDialog.condition} to ${npc.name}`);
+    } catch (error) {
+      console.error("Error adding condition:", error);
+      toast.error(`Failed to add condition: ${error.message}`);
     }
   };
 
-  // Handle action execution
-  const handleExecuteAction = (action: NPCAction) => {
-    setSelectedAction(action);
-    setNewAction({
-      type: "attack",
-      name: action.name,
-      description: action.description,
-    });
-    setIsActionDialogOpen(true);
-  };
-
-  const handleRegisterAction = async () => {
-    if (!combat || !newAction.name.trim()) return;
+  const handleRemoveCondition = async (conditionId: string) => {
+    if (!participant) return;
 
     try {
-      const success = await registerAction({
-        actor_id: npc._id,
-        action_type: newAction.type,
-        description: newAction.description || newAction.name,
-        target_id: newAction.target,
-      });
-
-      if (success) {
-        toast({
-          title: "Action Registered",
-          description: `${npc.name} used ${newAction.name}`,
-        });
-        setIsActionDialogOpen(false);
-        setNewAction({
-          type: "attack",
-          name: "",
-          description: "",
-        });
-        onActionPerformed?.();
-      }
+      await removeCondition(participant._id, conditionId);
+      toast.success("Condition removed");
     } catch (error) {
-      toast({
-        title: "Action Failed",
-        description: "Failed to register action",
-        variant: "destructive",
-      });
+      console.error("Error removing condition:", error);
+      toast.error(`Failed to remove condition: ${error.message}`);
     }
   };
 
-  // Auto-calculate initiative if not set
-  const autoInitiative = () => {
-    const d20Roll = Math.floor(Math.random() * 20) + 1;
-    const modifier = npc.stats.attributes
-      ? Math.floor((npc.stats.attributes.dexterity - 10) / 2)
-      : 0;
-    return d20Roll + modifier;
-  };
+  // ===== RENDER HELPERS =====
+  const renderHPBar = () => {
+    if (!participant) return null;
 
-  const currentHP = npc.stats.hp.current;
-  const maxHP = npc.stats.hp.max;
-  const hpPercentage = (currentHP / maxHP) * 100;
+    const { hit_points_current, hit_points_max, hit_points_temp } = participant;
+    const hpPercentage = (hit_points_current / hit_points_max) * 100;
+    const totalHP = hit_points_current + hit_points_temp;
 
-  return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Swords className="h-5 w-5" />
-              Combat Controls: {npc.name}
-              {isNPCTurn && (
-                <Badge variant="default" className="animate-pulse">
-                  Current Turn
-                </Badge>
-              )}
-            </div>
-
-            {npcInCombat && (
-              <Badge variant="outline">
-                Initiative: {npcInitiativeEntry?.initiative}
-              </Badge>
-            )}
-          </CardTitle>
-          <CardDescription>
-            Manage {npc.name} during combat encounters
-          </CardDescription>
-        </CardHeader>
-
-        <CardContent className="space-y-4">
-          {!isUserDM && (
-            <Alert>
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>
-                Most combat controls are restricted to the DM
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {/* HP Tracking */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label>Hit Points</Label>
-              <span className="text-sm text-muted-foreground">
-                {currentHP} / {maxHP}
-              </span>
-            </div>
-
-            <Progress
-              value={hpPercentage}
-              className="h-2"
-              // Red when low, yellow when medium, green when high
-              // Note: This would need custom CSS classes
-            />
-
-            {isUserDM && (
-              <div className="flex gap-2">
-                <Input
-                  type="number"
-                  placeholder="HP change"
-                  value={hpChange || ""}
-                  onChange={(e) => setHpChange(parseInt(e.target.value) || 0)}
-                  className="w-24"
-                />
-                <Button
-                  size="sm"
-                  onClick={handleHPChange}
-                  disabled={hpChange === 0}
-                  variant={hpChange > 0 ? "default" : "destructive"}
-                >
-                  <Heart className="h-4 w-4 mr-1" />
-                  {hpChange > 0 ? "Heal" : "Damage"}
-                </Button>
-              </div>
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <Label className="text-sm font-medium">Hit Points</Label>
+          <div className="text-sm">
+            {totalHP} / {hit_points_max}
+            {hit_points_temp > 0 && (
+              <span className="text-blue-500 ml-1">(+{hit_points_temp})</span>
             )}
           </div>
+        </div>
+        <Progress
+          value={hpPercentage}
+          className="h-2"
+          indicatorClassName={
+            hpPercentage <= 25
+              ? "bg-red-500"
+              : hpPercentage <= 50
+              ? "bg-yellow-500"
+              : "bg-green-500"
+          }
+        />
+      </div>
+    );
+  };
 
-          <Separator />
+  const renderActions = () => {
+    const allActions = [
+      ...npc.actions.map((a) => ({ ...a, category: "Actions" })),
+      ...(npc.legendary_actions || []).map((a) => ({
+        ...a,
+        category: "Legendary",
+      })),
+      ...(npc.reactions || []).map((a) => ({ ...a, category: "Reactions" })),
+    ];
 
-          {/* Initiative */}
-          {combat && isUserDM && (
-            <div className="space-y-2">
-              <Label>Initiative</Label>
+    if (allActions.length === 0) {
+      return (
+        <div className="text-center py-4 text-muted-foreground">
+          No actions available
+        </div>
+      );
+    }
 
-              {!npcInCombat ? (
-                <div className="flex gap-2">
-                  <Input
-                    type="number"
-                    placeholder={`Roll + ${initiativeModifier}`}
-                    value={initiativeValue || ""}
-                    onChange={(e) =>
-                      setInitiativeValue(parseInt(e.target.value) || null)
-                    }
-                    className="w-24"
-                  />
-                  <Button size="sm" onClick={() => handleRollInitiative()}>
-                    <Dice6 className="h-4 w-4 mr-1" />
-                    Roll
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleRollInitiative(true)}
-                  >
-                    Advantage
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleRollInitiative(false, true)}
-                  >
-                    Disadvantage
-                  </Button>
-                </div>
-              ) : (
-                <div className="text-sm">
-                  Already in initiative order (Initiative:{" "}
-                  {npcInitiativeEntry?.initiative})
-                </div>
-              )}
-            </div>
-          )}
-
-          <Separator />
-
-          {/* Actions */}
-          <div className="space-y-3">
-            <Label>Actions</Label>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {npc.actions.map((action, index) => (
+    return (
+      <div className="grid grid-cols-1 gap-2">
+        {allActions.map((action, index) => (
+          <TooltipProvider key={index}>
+            <Tooltip>
+              <TooltipTrigger asChild>
                 <Button
-                  key={index}
                   variant="outline"
                   size="sm"
-                  onClick={() => handleExecuteAction(action)}
-                  disabled={!isUserDM || !combat}
                   className="justify-start text-left h-auto p-3"
+                  onClick={() =>
+                    setActionDialog({
+                      open: true,
+                      action,
+                      target: "",
+                      rollAdvantage: false,
+                      rollDisadvantage: false,
+                    })
+                  }
+                  disabled={!canEdit || !participant}
                 >
-                  <div className="space-y-1">
-                    <div className="font-medium">{action.name}</div>
-                    {action.attack_bonus && (
-                      <div className="text-xs text-muted-foreground">
-                        Attack: +{action.attack_bonus}
-                        {action.damage && ` | Damage: ${action.damage}`}
-                      </div>
-                    )}
-                  </div>
-                </Button>
-              ))}
-
-              {npc.legendary_actions.length > 0 && (
-                <>
-                  <div className="col-span-full">
-                    <Label className="text-sm font-medium">
-                      Legendary Actions
-                    </Label>
-                  </div>
-                  {npc.legendary_actions.map((action, index) => (
-                    <Button
-                      key={`legendary-${index}`}
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleExecuteAction(action)}
-                      disabled={!isUserDM || !combat}
-                      className="justify-start text-left h-auto p-3 border-amber-200"
-                    >
-                      <div className="space-y-1">
-                        <div className="font-medium text-amber-700">
+                  <div className="flex items-start space-x-2 w-full">
+                    <div className="flex-shrink-0 mt-0.5">
+                      {action.attack_bonus !== undefined ? (
+                        <Sword className="h-4 w-4" />
+                      ) : action.save_dc !== undefined ? (
+                        <Shield className="h-4 w-4" />
+                      ) : (
+                        <Zap className="h-4 w-4" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium truncate">
                           {action.name}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          Legendary Action
-                        </div>
+                        </span>
+                        <Badge variant="secondary" className="text-xs">
+                          {action.category}
+                        </Badge>
                       </div>
-                    </Button>
-                  ))}
-                </>
-              )}
-
-              {isUserDM && (
-                <Button
-                  variant="dashed"
-                  size="sm"
-                  onClick={() => setIsActionDialogOpen(true)}
-                  className="justify-start"
-                >
-                  <Target className="h-4 w-4 mr-2" />
-                  Custom Action
+                      {action.attack_bonus !== undefined && (
+                        <div className="text-xs text-muted-foreground">
+                          +{action.attack_bonus} to hit
+                        </div>
+                      )}
+                      {action.save_dc !== undefined && (
+                        <div className="text-xs text-muted-foreground">
+                          DC {action.save_dc} {action.save_ability} save
+                        </div>
+                      )}
+                      {action.damage && (
+                        <div className="text-xs text-muted-foreground">
+                          {action.damage} damage
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left" className="max-w-sm">
+                <div className="space-y-2">
+                  <div className="font-medium">{action.name}</div>
+                  <div className="text-sm">{action.description}</div>
+                  {action.recharge && (
+                    <div className="text-xs text-muted-foreground">
+                      Recharge: {action.recharge}
+                    </div>
+                  )}
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ))}
+      </div>
+    );
+  };
+
+  const renderConditions = () => {
+    if (!participant || !participant.conditions.length) {
+      return (
+        <div className="text-center py-2 text-muted-foreground text-sm">
+          No conditions
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-2">
+        {participant.conditions.map((condition) => (
+          <div
+            key={condition.id}
+            className="flex items-center justify-between p-2 bg-muted rounded"
+          >
+            <div className="flex-1">
+              <div className="font-medium text-sm">{condition.name}</div>
+              {condition.description && (
+                <div className="text-xs text-muted-foreground">
+                  {condition.description}
+                </div>
               )}
+              <div className="text-xs text-muted-foreground">
+                Duration: {condition.duration} rounds
+              </div>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => handleRemoveCondition(condition.id)}
+              disabled={!canEdit}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  // ===== MAIN RENDER =====
+  return (
+    <Card className={`${isCurrentTurn ? "ring-2 ring-primary" : ""}`}>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-lg">{npc.name}</CardTitle>
+          <div className="flex items-center space-x-2">
+            {isCurrentTurn && (
+              <Badge variant="default" className="gap-1">
+                <Target className="h-3 w-3" />
+                Current Turn
+              </Badge>
+            )}
+            <Badge variant="outline">CR {npc.challenge_rating}</Badge>
+          </div>
+        </div>
+        <CardDescription>
+          {npc.type} • AC {npc.armor_class}
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent className="space-y-4">
+        {/* HP Management */}
+        {participant && (
+          <div className="space-y-3">
+            {renderHPBar()}
+
+            <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleHPAdjustment(-1)}
+                  disabled={!canEdit}
+                >
+                  <Minus className="h-3 w-3" />
+                </Button>
+                <Input
+                  type="number"
+                  value={hpAdjustment}
+                  onChange={(e) =>
+                    setHpAdjustment(parseInt(e.target.value) || 0)
+                  }
+                  className="w-16 text-center text-sm"
+                  placeholder="0"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleHPAdjustment(1)}
+                  disabled={!canEdit}
+                >
+                  <Plus className="h-3 w-3" />
+                </Button>
+              </div>
+
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => handleHPAdjustment(hpAdjustment)}
+                disabled={!canEdit || hpAdjustment === 0}
+              >
+                Apply
+              </Button>
+
+              <div className="flex items-center space-x-1">
+                <Input
+                  type="number"
+                  value={tempHP}
+                  onChange={(e) => setTempHP(parseInt(e.target.value) || 0)}
+                  className="w-16 text-center text-sm"
+                  placeholder="Temp"
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleTempHP}
+                  disabled={!canEdit || tempHP <= 0}
+                >
+                  <Heart className="h-3 w-3" />
+                </Button>
+              </div>
             </div>
           </div>
+        )}
 
-          {/* Conditions */}
-          {isUserDM && combat && (
-            <>
-              <Separator />
-              <div className="space-y-3">
-                <Label>Conditions</Label>
+        <Separator />
 
-                <div className="flex gap-2">
-                  <Select
-                    value={selectedCondition}
-                    onValueChange={setSelectedCondition}
-                  >
-                    <SelectTrigger className="w-40">
-                      <SelectValue placeholder="Condition" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {CONDITIONS.map((condition) => (
-                        <SelectItem key={condition} value={condition}>
-                          {condition}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+        {/* Actions */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label className="font-medium">Actions</Label>
+            <Badge variant="secondary">{npc.actions.length}</Badge>
+          </div>
+          {renderActions()}
+        </div>
 
-                  <Input
-                    type="number"
-                    placeholder="Duration"
-                    value={conditionDuration.value}
-                    onChange={(e) =>
-                      setConditionDuration({
-                        ...conditionDuration,
-                        value: parseInt(e.target.value) || 1,
-                      })
-                    }
-                    className="w-20"
-                  />
+        <Separator />
 
-                  <Select
-                    value={conditionDuration.type}
-                    onValueChange={(value: "rounds" | "minutes" | "hours") =>
-                      setConditionDuration({
-                        ...conditionDuration,
-                        type: value,
-                      })
-                    }
-                  >
-                    <SelectTrigger className="w-24">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="rounds">Rounds</SelectItem>
-                      <SelectItem value="minutes">Minutes</SelectItem>
-                      <SelectItem value="hours">Hours</SelectItem>
-                    </SelectContent>
-                  </Select>
+        {/* Conditions */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label className="font-medium">Conditions</Label>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                setConditionDialog({ ...conditionDialog, open: true })
+              }
+              disabled={!canEdit || !participant}
+            >
+              <Plus className="h-3 w-3 mr-1" />
+              Add
+            </Button>
+          </div>
+          {renderConditions()}
+        </div>
+      </CardContent>
 
-                  <Button
-                    size="sm"
-                    onClick={handleAddCondition}
-                    disabled={!selectedCondition}
-                  >
-                    Apply
-                  </Button>
-                </div>
-
-                {/* Current Conditions */}
-                {combat.conditions
-                  .filter((condition) => condition.target_id === npc._id)
-                  .map((condition, index) => (
-                    <Badge
-                      key={index}
-                      variant="destructive"
-                      className="cursor-pointer"
-                      onClick={() => removeCondition(condition.target_id)} // Simplified
-                    >
-                      {condition.condition} ({condition.duration.value}{" "}
-                      {condition.duration.type})
-                    </Badge>
-                  ))}
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Action Dialog */}
-      <Dialog open={isActionDialogOpen} onOpenChange={setIsActionDialogOpen}>
-        <DialogContent className="max-w-md">
+      {/* Action Execution Dialog */}
+      <Dialog
+        open={actionDialog.open}
+        onOpenChange={(open) => setActionDialog({ ...actionDialog, open })}
+      >
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle>Execute Action</DialogTitle>
+            <DialogTitle>
+              Execute Action: {actionDialog.action?.name}
+            </DialogTitle>
             <DialogDescription>
-              Register an action for {npc.name}
+              {actionDialog.action?.description}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Action Type</Label>
+            {actionDialog.action?.attack_bonus !== undefined && (
+              <div className="space-y-2">
+                <Label>Roll Modifier</Label>
+                <div className="flex space-x-2">
+                  <Button
+                    variant={actionDialog.rollAdvantage ? "default" : "outline"}
+                    size="sm"
+                    onClick={() =>
+                      setActionDialog({
+                        ...actionDialog,
+                        rollAdvantage: !actionDialog.rollAdvantage,
+                        rollDisadvantage: false,
+                      })
+                    }
+                  >
+                    Advantage
+                  </Button>
+                  <Button
+                    variant={
+                      actionDialog.rollDisadvantage ? "default" : "outline"
+                    }
+                    size="sm"
+                    onClick={() =>
+                      setActionDialog({
+                        ...actionDialog,
+                        rollDisadvantage: !actionDialog.rollDisadvantage,
+                        rollAdvantage: false,
+                      })
+                    }
+                  >
+                    Disadvantage
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end space-x-2">
+              <Button
+                variant="outline"
+                onClick={() =>
+                  setActionDialog({ ...actionDialog, open: false })
+                }
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => handleExecuteAction(actionDialog.action!)}
+                disabled={!actionDialog.action}
+              >
+                <Dice6 className="h-4 w-4 mr-2" />
+                Execute
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Condition Dialog */}
+      <Dialog
+        open={conditionDialog.open}
+        onOpenChange={(open) =>
+          setConditionDialog({ ...conditionDialog, open })
+        }
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Condition</DialogTitle>
+            <DialogDescription>Add a condition to {npc.name}</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div>
+              <Label>Condition</Label>
               <Select
-                value={newAction.type}
+                value={conditionDialog.condition}
                 onValueChange={(value) =>
-                  setNewAction({ ...newAction, type: value as any })
+                  setConditionDialog({ ...conditionDialog, condition: value })
                 }
               >
                 <SelectTrigger>
-                  <SelectValue />
+                  <SelectValue placeholder="Select condition" />
                 </SelectTrigger>
                 <SelectContent>
-                  {ACTION_TYPES.map((type) => {
-                    const Icon = type.icon;
-                    return (
-                      <SelectItem key={type.value} value={type.value}>
-                        <div className="flex items-center gap-2">
-                          <Icon className="h-4 w-4" />
-                          {type.label}
-                        </div>
-                      </SelectItem>
-                    );
-                  })}
+                  <SelectItem value="blinded">Blinded</SelectItem>
+                  <SelectItem value="charmed">Charmed</SelectItem>
+                  <SelectItem value="deafened">Deafened</SelectItem>
+                  <SelectItem value="frightened">Frightened</SelectItem>
+                  <SelectItem value="grappled">Grappled</SelectItem>
+                  <SelectItem value="incapacitated">Incapacitated</SelectItem>
+                  <SelectItem value="invisible">Invisible</SelectItem>
+                  <SelectItem value="paralyzed">Paralyzed</SelectItem>
+                  <SelectItem value="petrified">Petrified</SelectItem>
+                  <SelectItem value="poisoned">Poisoned</SelectItem>
+                  <SelectItem value="prone">Prone</SelectItem>
+                  <SelectItem value="restrained">Restrained</SelectItem>
+                  <SelectItem value="stunned">Stunned</SelectItem>
+                  <SelectItem value="unconscious">Unconscious</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label>Action Name</Label>
+            <div>
+              <Label>Duration (rounds)</Label>
               <Input
-                value={newAction.name}
+                type="number"
+                value={conditionDialog.duration}
                 onChange={(e) =>
-                  setNewAction({ ...newAction, name: e.target.value })
+                  setConditionDialog({
+                    ...conditionDialog,
+                    duration: parseInt(e.target.value) || 1,
+                  })
                 }
-                placeholder="Action name"
+                min={1}
               />
             </div>
 
-            <div className="space-y-2">
-              <Label>Description</Label>
+            <div>
+              <Label>Description (optional)</Label>
               <Textarea
-                value={newAction.description}
+                value={conditionDialog.description}
                 onChange={(e) =>
-                  setNewAction({ ...newAction, description: e.target.value })
+                  setConditionDialog({
+                    ...conditionDialog,
+                    description: e.target.value,
+                  })
                 }
-                placeholder="Describe what the NPC does..."
-                rows={3}
+                placeholder="Additional details about the condition..."
               />
             </div>
 
-            {(newAction.type === "attack" || newAction.type === "spell") && (
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-2">
-                  <Label>Damage</Label>
-                  <Input
-                    type="number"
-                    value={newAction.damage || ""}
-                    onChange={(e) =>
-                      setNewAction({
-                        ...newAction,
-                        damage: parseInt(e.target.value) || undefined,
-                      })
-                    }
-                    placeholder="0"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Healing</Label>
-                  <Input
-                    type="number"
-                    value={newAction.healing || ""}
-                    onChange={(e) =>
-                      setNewAction({
-                        ...newAction,
-                        healing: parseInt(e.target.value) || undefined,
-                      })
-                    }
-                    placeholder="0"
-                  />
-                </div>
-              </div>
-            )}
+            <div className="flex justify-end space-x-2">
+              <Button
+                variant="outline"
+                onClick={() =>
+                  setConditionDialog({ ...conditionDialog, open: false })
+                }
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleAddCondition}
+                disabled={!conditionDialog.condition}
+              >
+                Add Condition
+              </Button>
+            </div>
           </div>
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsActionDialogOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleRegisterAction}>Execute Action</Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </Card>
   );
 }

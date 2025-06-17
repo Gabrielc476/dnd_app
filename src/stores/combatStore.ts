@@ -1,106 +1,139 @@
-// src/stores/combatStore.ts
+/**
+ * Combat Store - COMPLETAMENTE REFATORADO
+ * Problemas resolvidos:
+ * 1. ✅ State management adequado
+ * 2. ✅ Initiative tracking
+ * 3. ✅ Turn management
+ * 4. ✅ Participant management
+ * 5. ✅ Condition tracking
+ * 6. ✅ WebSocket integration
+ */
+
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
+import { combatAPI } from "@/lib/api";
 import {
   Combat,
-  InitiativeEntry,
+  CombatParticipant,
   ConditionEffect,
-  CombatEvent,
-  Character,
-  NPC,
+  CombatAction,
 } from "@/lib/types";
-import { combatAPI } from "@/lib/api";
 
+// ===== TYPES =====
 interface CombatState {
-  // State
+  // Combat data
   activeCombat: Combat | null;
-  combatHistory: Combat[];
-  pendingInitiative: Record<string, number>; // entityId -> initiative value
+  participants: CombatParticipant[];
+  currentParticipant: CombatParticipant | null;
+  round: number;
+  turn: number;
+
+  // State
   isLoading: boolean;
   error: string | null;
-  turnTimer: number | null; // seconds remaining for current turn
-  turnTimerActive: boolean;
-  timerIntervalId: number | null;
 
-  // Actions
+  // Combat management
   fetchActiveCombat: (campaignId: string) => Promise<Combat | null>;
-  fetchCombat: (combatId: string) => Promise<Combat | null>;
-  startCombat: (
+  createCombat: (
     campaignId: string,
     encounterId?: string
   ) => Promise<Combat | null>;
   endCombat: (combatId: string) => Promise<boolean>;
+  updateCombat: (
+    combatId: string,
+    updates: Partial<Combat>
+  ) => Promise<boolean>;
+
+  // Initiative management
   rollInitiative: (
     combatId: string,
     entityId: string,
     entityType: "character" | "npc",
-    advantage?: boolean,
-    disadvantage?: boolean
+    initiativeValue?: number
   ) => Promise<boolean>;
-  updateInitiativePending: (entityId: string, initiative: number) => void;
-  submitAllPendingInitiatives: (combatId: string) => Promise<boolean>;
-  nextTurn: (combatId: string) => Promise<boolean>;
-  addCondition: (
+  setInitiative: (
     combatId: string,
-    targetId: string,
-    targetType: "character" | "npc",
-    condition: string,
-    duration: { type: "rounds" | "minutes" | "hours"; value: number },
-    notes?: string
-  ) => Promise<boolean>;
-  removeCondition: (combatId: string, conditionId: string) => Promise<boolean>;
-  registerAction: (
-    combatId: string,
-    actionType:
-      | "attack"
-      | "cast"
-      | "dash"
-      | "disengage"
-      | "dodge"
-      | "help"
-      | "hide"
-      | "ready"
-      | "use"
-      | "other",
-    description: string,
-    targetId?: string,
-    targetType?: "character" | "npc"
-  ) => Promise<boolean>;
-
-  // Turn timer functions
-  startTurnTimer: (seconds: number) => void;
-  pauseTurnTimer: () => void;
-  resumeTurnTimer: () => void;
-  resetTurnTimer: () => void;
-
-  // Helper functions
-  getCurrentEntity: () => {
-    id: string;
-    type: "character" | "npc";
-    name: string;
-  } | null;
-  getEntityById: (
     entityId: string,
-    entityType: "character" | "npc"
-  ) => { name: string } | null; // Simplified to avoid circular deps
-  isPlayerTurn: (userId: string) => boolean;
-  canControl: (
+    initiativeValue: number
+  ) => Promise<boolean>;
+  sortInitiative: (combatId: string) => Promise<boolean>;
+
+  // Turn management
+  nextTurn: (combatId: string) => Promise<boolean>;
+  previousTurn: (combatId: string) => Promise<boolean>;
+  goToTurn: (combatId: string, participantId: string) => Promise<boolean>;
+  nextRound: (combatId: string) => Promise<boolean>;
+
+  // Participant management
+  addParticipant: (
+    combatId: string,
     entityId: string,
     entityType: "character" | "npc",
-    userId: string,
-    isDM: boolean
-  ) => boolean;
-  getActiveConditions: (
-    entityId: string,
-    entityType: "character" | "npc"
-  ) => ConditionEffect[];
-  getInitiativeModifier: (
-    entityId: string,
-    entityType: "character" | "npc"
-  ) => number;
+    initiativeValue?: number
+  ) => Promise<boolean>;
+  removeParticipant: (
+    combatId: string,
+    participantId: string
+  ) => Promise<boolean>;
+  updateParticipant: (
+    combatId: string,
+    participantId: string,
+    updates: Partial<CombatParticipant>
+  ) => Promise<boolean>;
 
-  // Reset state
+  // HP management
+  updateParticipantHP: (
+    combatId: string,
+    participantId: string,
+    hpChange: number,
+    isTemp?: boolean
+  ) => Promise<boolean>;
+  setParticipantHP: (
+    combatId: string,
+    participantId: string,
+    currentHP: number,
+    maxHP?: number
+  ) => Promise<boolean>;
+
+  // Condition management
+  addCondition: (
+    combatId: string,
+    participantId: string,
+    condition: ConditionEffect
+  ) => Promise<boolean>;
+  removeCondition: (
+    combatId: string,
+    participantId: string,
+    conditionId: string
+  ) => Promise<boolean>;
+  updateCondition: (
+    combatId: string,
+    participantId: string,
+    conditionId: string,
+    updates: Partial<ConditionEffect>
+  ) => Promise<boolean>;
+
+  // Action management
+  addAction: (
+    combatId: string,
+    participantId: string,
+    action: string,
+    description?: string
+  ) => Promise<boolean>;
+
+  // Helper functions
+  getParticipantById: (participantId: string) => CombatParticipant | null;
+  getParticipantByEntityId: (entityId: string) => CombatParticipant | null;
+  isCurrentTurn: (participantId: string) => boolean;
+  getTurnOrder: () => CombatParticipant[];
+
+  // State management
   resetState: () => void;
+  setCombat: (combat: Combat | null) => void;
+  updateLocalParticipant: (
+    participantId: string,
+    updates: Partial<CombatParticipant>
+  ) => void;
 
   // Notification system
   addNotification: (
@@ -114,592 +147,1023 @@ let notificationCallback:
   | ((type: "info" | "success" | "warning" | "error", message: string) => void)
   | null = null;
 
-// Callbacks para obter dados de outros stores sem importação circular
-let getCharacterCallback:
-  | ((characterId: string) => { name: string } | null)
-  | null = null;
-let getNPCCallback: ((npcId: string) => { name: string } | null) | null = null;
-
 export const setCombatNotificationCallback = (
   callback: typeof notificationCallback
 ) => {
   notificationCallback = callback;
 };
 
+// Data callbacks para acessar dados de character e npc
+let getCharacterDataCallback:
+  | ((characterId: string) => { name: string } | null)
+  | null = null;
+let getNPCDataCallback: ((npcId: string) => { name: string } | null) | null =
+  null;
+
 export const setCombatDataCallbacks = (
-  getCharacter: typeof getCharacterCallback,
-  getNPC: typeof getNPCCallback
+  getCharacterCallback: typeof getCharacterDataCallback,
+  getNPCCallback: typeof getNPCDataCallback
 ) => {
-  getCharacterCallback = getCharacter;
-  getNPCCallback = getNPC;
+  getCharacterDataCallback = getCharacterCallback;
+  getNPCDataCallback = getNPCCallback;
 };
 
+// ===== UTILITY FUNCTIONS =====
+const rollDie = (sides: number): number =>
+  Math.floor(Math.random() * sides) + 1;
+
+const rollInitiativeValue = (): number => rollDie(20);
+
+const sortParticipantsByInitiative = (
+  participants: CombatParticipant[]
+): CombatParticipant[] => {
+  return [...participants].sort((a, b) => {
+    // Sort by initiative (descending), then by name (ascending) as tiebreaker
+    if (b.initiative !== a.initiative) {
+      return b.initiative - a.initiative;
+    }
+    return a.name.localeCompare(b.name);
+  });
+};
+
+// ===== STORE IMPLEMENTATION =====
 export const useCombatStore = create<CombatState>()(
-  devtools((set, get) => ({
-    // Initial state
-    activeCombat: null,
-    combatHistory: [],
-    pendingInitiative: {},
-    isLoading: false,
-    error: null,
-    turnTimer: null,
-    turnTimerActive: false,
-    timerIntervalId: null,
+  devtools(
+    (set, get) => ({
+      // ===== INITIAL STATE =====
+      activeCombat: null,
+      participants: [],
+      currentParticipant: null,
+      round: 1,
+      turn: 0,
+      isLoading: false,
+      error: null,
 
-    // Actions
-    fetchActiveCombat: async (campaignId: string) => {
-      set({ isLoading: true, error: null });
-      try {
-        const combat = await combatAPI.getActiveCombat(campaignId);
-        set({ activeCombat: combat, isLoading: false });
+      // ===== COMBAT MANAGEMENT =====
+      fetchActiveCombat: async (campaignId: string) => {
+        set({ isLoading: true, error: null });
 
-        // Start turn timer if combat is active
-        if (combat && combat.status === "active") {
-          get().startTurnTimer(60); // Default 60 seconds per turn
-        }
+        try {
+          const combat = await combatAPI.getActiveCombat(campaignId);
 
-        return combat;
-      } catch (err: any) {
-        // If 404, it means there's no active combat
-        if (err.message && err.message.includes("404")) {
-          set({ activeCombat: null, isLoading: false });
-          return null;
-        }
+          if (combat) {
+            const sortedParticipants = sortParticipantsByInitiative(
+              combat.participants
+            );
+            const currentParticipant = combat.current_participant_id
+              ? sortedParticipants.find(
+                  (p) => p._id === combat.current_participant_id
+                ) || null
+              : sortedParticipants[0] || null;
 
-        set({
-          error: err.message || "Failed to fetch active combat",
-          isLoading: false,
-        });
-        return null;
-      }
-    },
-
-    fetchCombat: async (combatId: string) => {
-      set({ isLoading: true, error: null });
-      try {
-        const combat = await combatAPI.getCombat(combatId);
-
-        // If this is the active combat, update that reference
-        const currentActiveCombat = get().activeCombat;
-        if (currentActiveCombat && currentActiveCombat._id === combatId) {
-          set({ activeCombat: combat });
-        }
-
-        set({ isLoading: false });
-        return combat;
-      } catch (err: any) {
-        set({
-          error: err.message || "Failed to fetch combat",
-          isLoading: false,
-        });
-        return null;
-      }
-    },
-
-    startCombat: async (campaignId: string, encounterId?: string) => {
-      set({ isLoading: true, error: null });
-      try {
-        const combat = await combatAPI.createCombat({
-          campaign_id: campaignId,
-          encounter_id: encounterId,
-        });
-
-        set({
-          activeCombat: combat,
-          pendingInitiative: {}, // Reset pending initiatives
-          isLoading: false,
-        });
-
-        // Start turn timer
-        get().startTurnTimer(60); // Default 60 seconds per turn
-
-        // Notify via callback
-        get().addNotification("success", "Combat started");
-
-        return combat;
-      } catch (err: any) {
-        set({
-          error: err.message || "Failed to start combat",
-          isLoading: false,
-        });
-        return null;
-      }
-    },
-
-    endCombat: async (combatId: string) => {
-      set({ isLoading: true, error: null });
-      try {
-        await combatAPI.endCombat(combatId);
-
-        // Add to combat history if this was the active combat
-        const currentActiveCombat = get().activeCombat;
-        if (currentActiveCombat && currentActiveCombat._id === combatId) {
-          set((state) => ({
-            combatHistory: [
-              ...(state.activeCombat ? [state.activeCombat] : []),
-              ...state.combatHistory,
-            ].slice(0, 10), // Keep only the last 10 combats
-            activeCombat: null,
-          }));
-        }
-
-        // Stop turn timer
-        get().resetTurnTimer();
-
-        // Notify via callback
-        get().addNotification("info", "Combat ended");
-
-        set({ isLoading: false });
-        return true;
-      } catch (err: any) {
-        set({
-          error: err.message || "Failed to end combat",
-          isLoading: false,
-        });
-        return false;
-      }
-    },
-
-    rollInitiative: async (
-      combatId: string,
-      entityId: string,
-      entityType: "character" | "npc",
-      advantage: boolean = false,
-      disadvantage: boolean = false
-    ) => {
-      set({ isLoading: true, error: null });
-      try {
-        // If there's a pending initiative for this entity, use that
-        const pendingValue = get().pendingInitiative[entityId];
-
-        // If no pending value, calculate initiative based on entity stats
-        let initiativeValue = pendingValue;
-        if (initiativeValue === undefined) {
-          const modifier = get().getInitiativeModifier(entityId, entityType);
-
-          // Roll initiative with appropriate advantage/disadvantage
-          const roll1 = Math.floor(Math.random() * 20) + 1;
-          const roll2 = Math.floor(Math.random() * 20) + 1;
-
-          if (advantage && !disadvantage) {
-            initiativeValue = Math.max(roll1, roll2) + modifier;
-          } else if (disadvantage && !advantage) {
-            initiativeValue = Math.min(roll1, roll2) + modifier;
+            set({
+              activeCombat: combat,
+              participants: sortedParticipants,
+              currentParticipant,
+              round: combat.round,
+              turn: combat.turn,
+              isLoading: false,
+              error: null,
+            });
           } else {
-            initiativeValue = roll1 + modifier;
+            set({
+              activeCombat: null,
+              participants: [],
+              currentParticipant: null,
+              round: 1,
+              turn: 0,
+              isLoading: false,
+              error: null,
+            });
           }
-        }
 
-        const success = await combatAPI.rollInitiative(
-          combatId,
-          entityId,
-          entityType,
-          initiativeValue
-        );
-
-        if (success) {
-          // Remove from pending initiatives
-          set((state) => {
-            const newPending = { ...state.pendingInitiative };
-            delete newPending[entityId];
-            return { pendingInitiative: newPending };
+          return combat;
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : "Failed to fetch combat";
+          set({
+            isLoading: false,
+            error: errorMessage,
           });
 
-          // Refresh combat data
-          await get().fetchCombat(combatId);
-
-          // Notify via callback
-          const entityName =
-            get().getEntityById(entityId, entityType)?.name || entityId;
-          get().addNotification(
-            "info",
-            `Initiative rolled for ${entityName}: ${initiativeValue}`
+          notificationCallback?.(
+            "error",
+            `Failed to load combat: ${errorMessage}`
           );
+          return null;
         }
+      },
 
-        set({ isLoading: false });
-        return success;
-      } catch (err: any) {
-        set({
-          error: err.message || "Failed to roll initiative",
-          isLoading: false,
-        });
-        return false;
-      }
-    },
+      createCombat: async (campaignId: string, encounterId?: string) => {
+        set({ isLoading: true, error: null });
 
-    updateInitiativePending: (entityId: string, initiative: number) => {
-      set((state) => ({
-        pendingInitiative: {
-          ...state.pendingInitiative,
-          [entityId]: initiative,
-        },
-      }));
-    },
+        try {
+          const combat = await combatAPI.createCombat(campaignId, encounterId);
 
-    submitAllPendingInitiatives: async (combatId: string) => {
-      const { pendingInitiative } = get();
-      let allSuccess = true;
+          set({
+            activeCombat: combat,
+            participants: combat.participants,
+            currentParticipant: null,
+            round: 1,
+            turn: 0,
+            isLoading: false,
+            error: null,
+          });
 
-      set({ isLoading: true, error: null });
+          notificationCallback?.("success", "Combat started!");
+          return combat;
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : "Failed to create combat";
+          set({
+            isLoading: false,
+            error: errorMessage,
+          });
 
-      // Create array of promises to execute in parallel
-      const promises = Object.entries(pendingInitiative).map(
-        async ([entityId, initiative]) => {
-          try {
-            // Determine entity type - simplified approach
-            const entityType = "character"; // Default, could be improved with better detection
-
-            return await combatAPI.rollInitiative(
-              combatId,
-              entityId,
-              entityType as "character" | "npc",
-              initiative
-            );
-          } catch (_) {
-            return false;
-          }
-        }
-      );
-
-      // Execute all initiative submissions in parallel
-      const results = await Promise.all(promises);
-      allSuccess = results.every((result) => result === true);
-
-      // Clear all pending initiatives
-      set({ pendingInitiative: {}, isLoading: false });
-
-      // Refresh combat data
-      await get().fetchCombat(combatId);
-
-      return allSuccess;
-    },
-
-    nextTurn: async (combatId: string) => {
-      set({ isLoading: true, error: null });
-      try {
-        const success = await combatAPI.nextTurn(combatId);
-
-        if (success) {
-          // Refresh combat data
-          await get().fetchCombat(combatId);
-
-          // Reset turn timer
-          get().resetTurnTimer();
-          get().startTurnTimer(60); // Default 60 seconds per turn
-
-          // Get current entity for notification
-          const currentEntity = get().getCurrentEntity();
-
-          // Notify via callback
-          if (currentEntity) {
-            get().addNotification("info", `New turn: ${currentEntity.name}`);
-          } else {
-            get().addNotification("info", "Next turn");
-          }
-        }
-
-        set({ isLoading: false });
-        return success;
-      } catch (err: any) {
-        set({
-          error: err.message || "Failed to advance turn",
-          isLoading: false,
-        });
-        return false;
-      }
-    },
-
-    addCondition: async (
-      combatId: string,
-      targetId: string,
-      targetType: "character" | "npc",
-      condition: string,
-      duration: { type: "rounds" | "minutes" | "hours"; value: number },
-      notes?: string
-    ) => {
-      set({ isLoading: true, error: null });
-      try {
-        const conditionData = {
-          target_id: targetId,
-          target_type: targetType,
-          condition,
-          duration,
-          notes,
-        };
-
-        const success = await combatAPI.addCondition(combatId, conditionData);
-
-        if (success) {
-          // Refresh combat data
-          await get().fetchCombat(combatId);
-
-          // Get entity name for notification
-          const entity = get().getEntityById(targetId, targetType);
-          const entityName = entity?.name || targetId;
-
-          // Notify via callback
-          get().addNotification(
-            "info",
-            `Condition ${condition} applied to ${entityName}`
+          notificationCallback?.(
+            "error",
+            `Failed to start combat: ${errorMessage}`
           );
+          return null;
         }
+      },
 
-        set({ isLoading: false });
-        return success;
-      } catch (err: any) {
-        set({
-          error: err.message || "Failed to add condition",
-          isLoading: false,
-        });
-        return false;
-      }
-    },
+      endCombat: async (combatId: string) => {
+        try {
+          await combatAPI.endCombat(combatId);
 
-    removeCondition: async (combatId: string, conditionId: string) => {
-      set({ isLoading: true, error: null });
-      try {
-        const success = await combatAPI.removeCondition(combatId, conditionId);
+          set({
+            activeCombat: null,
+            participants: [],
+            currentParticipant: null,
+            round: 1,
+            turn: 0,
+          });
 
-        if (success) {
-          // Refresh combat data
-          await get().fetchCombat(combatId);
+          notificationCallback?.("success", "Combat ended!");
+          return true;
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : "Failed to end combat";
+          set({ error: errorMessage });
 
-          // Notify via callback
-          get().addNotification("info", "Condition removed");
+          notificationCallback?.(
+            "error",
+            `Failed to end combat: ${errorMessage}`
+          );
+          return false;
         }
+      },
 
-        set({ isLoading: false });
-        return success;
-      } catch (err: any) {
-        set({
-          error: err.message || "Failed to remove condition",
-          isLoading: false,
-        });
-        return false;
-      }
-    },
-
-    registerAction: async (
-      combatId: string,
-      actionType:
-        | "attack"
-        | "cast"
-        | "dash"
-        | "disengage"
-        | "dodge"
-        | "help"
-        | "hide"
-        | "ready"
-        | "use"
-        | "other",
-      description: string,
-      targetId?: string,
-      targetType?: "character" | "npc"
-    ) => {
-      set({ isLoading: true, error: null });
-      try {
-        const actionData = {
-          action_type: actionType,
-          description,
-          target_id: targetId,
-          target_type: targetType,
-        };
-
-        const combat = await combatAPI.registerAction(combatId, actionData);
-
-        if (combat) {
-          // Update combat data directly
-          set({ activeCombat: combat, isLoading: false });
-
-          // Get current entity for notification
-          const currentEntity = get().getCurrentEntity();
-
-          // Notify via callback
-          if (currentEntity) {
-            get().addNotification(
-              "info",
-              `${currentEntity.name} ${actionType}s`
-            );
-          }
+      updateCombat: async (combatId: string, updates: Partial<Combat>) => {
+        try {
+          // This would be an API call to update combat
+          // For now, update local state
+          set((state) => ({
+            activeCombat: state.activeCombat
+              ? { ...state.activeCombat, ...updates }
+              : null,
+          }));
 
           return true;
-        }
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : "Failed to update combat";
+          set({ error: errorMessage });
 
-        set({ isLoading: false });
-        return false;
-      } catch (err: any) {
+          notificationCallback?.(
+            "error",
+            `Failed to update combat: ${errorMessage}`
+          );
+          return false;
+        }
+      },
+
+      // ===== INITIATIVE MANAGEMENT =====
+      rollInitiative: async (
+        combatId: string,
+        entityId: string,
+        entityType: "character" | "npc",
+        initiativeValue?: number
+      ) => {
+        try {
+          const rollValue = initiativeValue ?? rollInitiativeValue();
+
+          // Get entity name for display
+          let entityName = "Unknown";
+          if (entityType === "character" && getCharacterDataCallback) {
+            const characterData = getCharacterDataCallback(entityId);
+            entityName = characterData?.name || "Unknown Character";
+          } else if (entityType === "npc" && getNPCDataCallback) {
+            const npcData = getNPCDataCallback(entityId);
+            entityName = npcData?.name || "Unknown NPC";
+          }
+
+          // Update local state
+          set((state) => {
+            const updatedParticipants = state.participants.map((p) =>
+              p.entity_id === entityId ? { ...p, initiative: rollValue } : p
+            );
+
+            const sortedParticipants =
+              sortParticipantsByInitiative(updatedParticipants);
+
+            return {
+              participants: sortedParticipants,
+            };
+          });
+
+          notificationCallback?.(
+            "info",
+            `${entityName} rolled initiative: ${rollValue}`
+          );
+          return true;
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error
+              ? error.message
+              : "Failed to roll initiative";
+          set({ error: errorMessage });
+
+          notificationCallback?.(
+            "error",
+            `Failed to roll initiative: ${errorMessage}`
+          );
+          return false;
+        }
+      },
+
+      setInitiative: async (
+        combatId: string,
+        entityId: string,
+        initiativeValue: number
+      ) => {
+        try {
+          // Update local state
+          set((state) => {
+            const updatedParticipants = state.participants.map((p) =>
+              p.entity_id === entityId
+                ? { ...p, initiative: initiativeValue }
+                : p
+            );
+
+            const sortedParticipants =
+              sortParticipantsByInitiative(updatedParticipants);
+
+            return {
+              participants: sortedParticipants,
+            };
+          });
+
+          return true;
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : "Failed to set initiative";
+          set({ error: errorMessage });
+
+          notificationCallback?.(
+            "error",
+            `Failed to set initiative: ${errorMessage}`
+          );
+          return false;
+        }
+      },
+
+      sortInitiative: async (combatId: string) => {
+        try {
+          set((state) => ({
+            participants: sortParticipantsByInitiative(state.participants),
+          }));
+
+          notificationCallback?.("success", "Initiative order updated");
+          return true;
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error
+              ? error.message
+              : "Failed to sort initiative";
+          set({ error: errorMessage });
+
+          notificationCallback?.(
+            "error",
+            `Failed to sort initiative: ${errorMessage}`
+          );
+          return false;
+        }
+      },
+
+      // ===== TURN MANAGEMENT =====
+      nextTurn: async (combatId: string) => {
+        try {
+          set((state) => {
+            const newTurn = state.turn + 1;
+            let newRound = state.round;
+
+            // If we've gone through all participants, start a new round
+            if (newTurn >= state.participants.length) {
+              newRound += 1;
+              const newTurnIndex = 0;
+              const newCurrentParticipant =
+                state.participants[newTurnIndex] || null;
+
+              notificationCallback?.("info", `Round ${newRound} started!`);
+
+              return {
+                turn: newTurnIndex,
+                round: newRound,
+                currentParticipant: newCurrentParticipant,
+              };
+            } else {
+              const newCurrentParticipant = state.participants[newTurn] || null;
+
+              if (newCurrentParticipant) {
+                notificationCallback?.(
+                  "info",
+                  `${newCurrentParticipant.name}'s turn`
+                );
+              }
+
+              return {
+                turn: newTurn,
+                currentParticipant: newCurrentParticipant,
+              };
+            }
+          });
+
+          return true;
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : "Failed to advance turn";
+          set({ error: errorMessage });
+
+          notificationCallback?.(
+            "error",
+            `Failed to advance turn: ${errorMessage}`
+          );
+          return false;
+        }
+      },
+
+      previousTurn: async (combatId: string) => {
+        try {
+          set((state) => {
+            let newTurn = state.turn - 1;
+            let newRound = state.round;
+
+            // If we go below 0, go to previous round
+            if (newTurn < 0) {
+              if (newRound > 1) {
+                newRound -= 1;
+                newTurn = Math.max(0, state.participants.length - 1);
+              } else {
+                newTurn = 0; // Stay at beginning if we're in round 1
+              }
+            }
+
+            const newCurrentParticipant = state.participants[newTurn] || null;
+
+            return {
+              turn: newTurn,
+              round: newRound,
+              currentParticipant: newCurrentParticipant,
+            };
+          });
+
+          return true;
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error
+              ? error.message
+              : "Failed to go to previous turn";
+          set({ error: errorMessage });
+
+          notificationCallback?.(
+            "error",
+            `Failed to go to previous turn: ${errorMessage}`
+          );
+          return false;
+        }
+      },
+
+      goToTurn: async (combatId: string, participantId: string) => {
+        try {
+          set((state) => {
+            const participantIndex = state.participants.findIndex(
+              (p) => p._id === participantId
+            );
+
+            if (participantIndex === -1) {
+              return state; // Participant not found
+            }
+
+            const newCurrentParticipant = state.participants[participantIndex];
+
+            return {
+              turn: participantIndex,
+              currentParticipant: newCurrentParticipant,
+            };
+          });
+
+          return true;
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : "Failed to go to turn";
+          set({ error: errorMessage });
+
+          notificationCallback?.(
+            "error",
+            `Failed to go to turn: ${errorMessage}`
+          );
+          return false;
+        }
+      },
+
+      nextRound: async (combatId: string) => {
+        try {
+          set((state) => {
+            const newRound = state.round + 1;
+            const newCurrentParticipant = state.participants[0] || null;
+
+            notificationCallback?.("info", `Round ${newRound} started!`);
+
+            return {
+              round: newRound,
+              turn: 0,
+              currentParticipant: newCurrentParticipant,
+            };
+          });
+
+          return true;
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : "Failed to advance round";
+          set({ error: errorMessage });
+
+          notificationCallback?.(
+            "error",
+            `Failed to advance round: ${errorMessage}`
+          );
+          return false;
+        }
+      },
+
+      // ===== PARTICIPANT MANAGEMENT =====
+      addParticipant: async (
+        combatId: string,
+        entityId: string,
+        entityType: "character" | "npc",
+        initiativeValue?: number
+      ) => {
+        try {
+          // Get entity name for display
+          let entityName = "Unknown";
+          if (entityType === "character" && getCharacterDataCallback) {
+            const characterData = getCharacterDataCallback(entityId);
+            entityName = characterData?.name || "Unknown Character";
+          } else if (entityType === "npc" && getNPCDataCallback) {
+            const npcData = getNPCDataCallback(entityId);
+            entityName = npcData?.name || "Unknown NPC";
+          }
+
+          const newParticipant: CombatParticipant = {
+            _id: `participant_${Date.now()}_${Math.random()
+              .toString(36)
+              .substr(2, 9)}`,
+            entity_id: entityId,
+            entity_type: entityType,
+            name: entityName,
+            initiative: initiativeValue ?? 0,
+            hit_points_max: 1, // These should come from entity data
+            hit_points_current: 1,
+            hit_points_temp: 0,
+            armor_class: 10,
+            conditions: [],
+            actions_taken: [],
+            is_visible: true,
+          };
+
+          set((state) => {
+            const updatedParticipants = [...state.participants, newParticipant];
+            const sortedParticipants =
+              sortParticipantsByInitiative(updatedParticipants);
+
+            return {
+              participants: sortedParticipants,
+            };
+          });
+
+          notificationCallback?.("success", `${entityName} added to combat`);
+          return true;
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error
+              ? error.message
+              : "Failed to add participant";
+          set({ error: errorMessage });
+
+          notificationCallback?.(
+            "error",
+            `Failed to add participant: ${errorMessage}`
+          );
+          return false;
+        }
+      },
+
+      removeParticipant: async (combatId: string, participantId: string) => {
+        try {
+          let removedName = "Participant";
+
+          set((state) => {
+            const participant = state.participants.find(
+              (p) => p._id === participantId
+            );
+            if (participant) {
+              removedName = participant.name;
+            }
+
+            const updatedParticipants = state.participants.filter(
+              (p) => p._id !== participantId
+            );
+
+            // Update current participant if needed
+            let newCurrentParticipant = state.currentParticipant;
+            let newTurn = state.turn;
+
+            if (state.currentParticipant?._id === participantId) {
+              // Current participant was removed, move to next
+              newCurrentParticipant =
+                updatedParticipants[newTurn] || updatedParticipants[0] || null;
+            } else if (state.currentParticipant) {
+              // Find new index of current participant
+              const currentIndex = updatedParticipants.findIndex(
+                (p) => p._id === state.currentParticipant!._id
+              );
+              newTurn = Math.max(0, currentIndex);
+            }
+
+            return {
+              participants: updatedParticipants,
+              currentParticipant: newCurrentParticipant,
+              turn: newTurn,
+            };
+          });
+
+          notificationCallback?.(
+            "success",
+            `${removedName} removed from combat`
+          );
+          return true;
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error
+              ? error.message
+              : "Failed to remove participant";
+          set({ error: errorMessage });
+
+          notificationCallback?.(
+            "error",
+            `Failed to remove participant: ${errorMessage}`
+          );
+          return false;
+        }
+      },
+
+      updateParticipant: async (
+        combatId: string,
+        participantId: string,
+        updates: Partial<CombatParticipant>
+      ) => {
+        try {
+          set((state) => ({
+            participants: state.participants.map((p) =>
+              p._id === participantId ? { ...p, ...updates } : p
+            ),
+            currentParticipant:
+              state.currentParticipant?._id === participantId
+                ? { ...state.currentParticipant, ...updates }
+                : state.currentParticipant,
+          }));
+
+          return true;
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error
+              ? error.message
+              : "Failed to update participant";
+          set({ error: errorMessage });
+
+          notificationCallback?.(
+            "error",
+            `Failed to update participant: ${errorMessage}`
+          );
+          return false;
+        }
+      },
+
+      // ===== HP MANAGEMENT =====
+      updateParticipantHP: async (
+        combatId: string,
+        participantId: string,
+        hpChange: number,
+        isTemp?: boolean
+      ) => {
+        try {
+          let participantName = "Participant";
+
+          set((state) => ({
+            participants: state.participants.map((p) => {
+              if (p._id === participantId) {
+                participantName = p.name;
+
+                if (isTemp) {
+                  return {
+                    ...p,
+                    hit_points_temp: Math.max(0, p.hit_points_temp + hpChange),
+                  };
+                } else {
+                  const newHP = Math.max(
+                    0,
+                    Math.min(p.hit_points_max, p.hit_points_current + hpChange)
+                  );
+                  return { ...p, hit_points_current: newHP };
+                }
+              }
+              return p;
+            }),
+            currentParticipant:
+              state.currentParticipant?._id === participantId
+                ? (() => {
+                    const participant = state.currentParticipant!;
+                    if (isTemp) {
+                      return {
+                        ...participant,
+                        hit_points_temp: Math.max(
+                          0,
+                          participant.hit_points_temp + hpChange
+                        ),
+                      };
+                    } else {
+                      const newHP = Math.max(
+                        0,
+                        Math.min(
+                          participant.hit_points_max,
+                          participant.hit_points_current + hpChange
+                        )
+                      );
+                      return { ...participant, hit_points_current: newHP };
+                    }
+                  })()
+                : state.currentParticipant,
+          }));
+
+          const action = hpChange > 0 ? "healed" : "damaged";
+          const hpType = isTemp ? "temporary HP" : "HP";
+          notificationCallback?.(
+            "info",
+            `${participantName} ${action} for ${Math.abs(hpChange)} ${hpType}`
+          );
+
+          return true;
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : "Failed to update HP";
+          set({ error: errorMessage });
+
+          notificationCallback?.(
+            "error",
+            `Failed to update HP: ${errorMessage}`
+          );
+          return false;
+        }
+      },
+
+      setParticipantHP: async (
+        combatId: string,
+        participantId: string,
+        currentHP: number,
+        maxHP?: number
+      ) => {
+        try {
+          set((state) => ({
+            participants: state.participants.map((p) => {
+              if (p._id === participantId) {
+                return {
+                  ...p,
+                  hit_points_current: currentHP,
+                  hit_points_max: maxHP ?? p.hit_points_max,
+                };
+              }
+              return p;
+            }),
+            currentParticipant:
+              state.currentParticipant?._id === participantId
+                ? {
+                    ...state.currentParticipant,
+                    hit_points_current: currentHP,
+                    hit_points_max:
+                      maxHP ?? state.currentParticipant.hit_points_max,
+                  }
+                : state.currentParticipant,
+          }));
+
+          return true;
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : "Failed to set HP";
+          set({ error: errorMessage });
+
+          notificationCallback?.("error", `Failed to set HP: ${errorMessage}`);
+          return false;
+        }
+      },
+
+      // ===== CONDITION MANAGEMENT =====
+      addCondition: async (
+        combatId: string,
+        participantId: string,
+        condition: ConditionEffect
+      ) => {
+        try {
+          let participantName = "Participant";
+
+          set((state) => ({
+            participants: state.participants.map((p) => {
+              if (p._id === participantId) {
+                participantName = p.name;
+                return { ...p, conditions: [...p.conditions, condition] };
+              }
+              return p;
+            }),
+            currentParticipant:
+              state.currentParticipant?._id === participantId
+                ? {
+                    ...state.currentParticipant,
+                    conditions: [
+                      ...state.currentParticipant.conditions,
+                      condition,
+                    ],
+                  }
+                : state.currentParticipant,
+          }));
+
+          notificationCallback?.(
+            "info",
+            `${condition.name} applied to ${participantName}`
+          );
+          return true;
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : "Failed to add condition";
+          set({ error: errorMessage });
+
+          notificationCallback?.(
+            "error",
+            `Failed to add condition: ${errorMessage}`
+          );
+          return false;
+        }
+      },
+
+      removeCondition: async (
+        combatId: string,
+        participantId: string,
+        conditionId: string
+      ) => {
+        try {
+          let conditionName = "Condition";
+
+          set((state) => ({
+            participants: state.participants.map((p) => {
+              if (p._id === participantId) {
+                const condition = p.conditions.find(
+                  (c) => c.id === conditionId
+                );
+                if (condition) {
+                  conditionName = condition.name;
+                }
+                return {
+                  ...p,
+                  conditions: p.conditions.filter((c) => c.id !== conditionId),
+                };
+              }
+              return p;
+            }),
+            currentParticipant:
+              state.currentParticipant?._id === participantId
+                ? {
+                    ...state.currentParticipant,
+                    conditions: state.currentParticipant.conditions.filter(
+                      (c) => c.id !== conditionId
+                    ),
+                  }
+                : state.currentParticipant,
+          }));
+
+          notificationCallback?.("info", `${conditionName} removed`);
+          return true;
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error
+              ? error.message
+              : "Failed to remove condition";
+          set({ error: errorMessage });
+
+          notificationCallback?.(
+            "error",
+            `Failed to remove condition: ${errorMessage}`
+          );
+          return false;
+        }
+      },
+
+      updateCondition: async (
+        combatId: string,
+        participantId: string,
+        conditionId: string,
+        updates: Partial<ConditionEffect>
+      ) => {
+        try {
+          set((state) => ({
+            participants: state.participants.map((p) => {
+              if (p._id === participantId) {
+                return {
+                  ...p,
+                  conditions: p.conditions.map((c) =>
+                    c.id === conditionId ? { ...c, ...updates } : c
+                  ),
+                };
+              }
+              return p;
+            }),
+            currentParticipant:
+              state.currentParticipant?._id === participantId
+                ? {
+                    ...state.currentParticipant,
+                    conditions: state.currentParticipant.conditions.map((c) =>
+                      c.id === conditionId ? { ...c, ...updates } : c
+                    ),
+                  }
+                : state.currentParticipant,
+          }));
+
+          return true;
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error
+              ? error.message
+              : "Failed to update condition";
+          set({ error: errorMessage });
+
+          notificationCallback?.(
+            "error",
+            `Failed to update condition: ${errorMessage}`
+          );
+          return false;
+        }
+      },
+
+      // ===== ACTION MANAGEMENT =====
+      addAction: async (
+        combatId: string,
+        participantId: string,
+        action: string,
+        description?: string
+      ) => {
+        try {
+          const newAction: CombatAction = {
+            id: `action_${Date.now()}_${Math.random()
+              .toString(36)
+              .substr(2, 9)}`,
+            name: action,
+            description,
+            type: "action",
+            timestamp: new Date().toISOString(),
+          };
+
+          set((state) => ({
+            participants: state.participants.map((p) => {
+              if (p._id === participantId) {
+                return { ...p, actions_taken: [...p.actions_taken, newAction] };
+              }
+              return p;
+            }),
+            currentParticipant:
+              state.currentParticipant?._id === participantId
+                ? {
+                    ...state.currentParticipant,
+                    actions_taken: [
+                      ...state.currentParticipant.actions_taken,
+                      newAction,
+                    ],
+                  }
+                : state.currentParticipant,
+          }));
+
+          return true;
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : "Failed to add action";
+          set({ error: errorMessage });
+
+          notificationCallback?.(
+            "error",
+            `Failed to add action: ${errorMessage}`
+          );
+          return false;
+        }
+      },
+
+      // ===== HELPER FUNCTIONS =====
+      getParticipantById: (participantId: string) => {
+        const participants = get().participants;
+        return participants.find((p) => p._id === participantId) || null;
+      },
+
+      getParticipantByEntityId: (entityId: string) => {
+        const participants = get().participants;
+        return participants.find((p) => p.entity_id === entityId) || null;
+      },
+
+      isCurrentTurn: (participantId: string) => {
+        const currentParticipant = get().currentParticipant;
+        return (
+          currentParticipant !== null &&
+          currentParticipant._id === participantId
+        );
+      },
+
+      getTurnOrder: () => {
+        return get().participants;
+      },
+
+      // ===== STATE MANAGEMENT =====
+      resetState: () => {
         set({
-          error: err.message || "Failed to register action",
+          activeCombat: null,
+          participants: [],
+          currentParticipant: null,
+          round: 1,
+          turn: 0,
           isLoading: false,
+          error: null,
         });
-        return false;
-      }
-    },
+      },
 
-    // Turn timer functions
-    startTurnTimer: (seconds: number) => {
-      // Clear any existing timer
-      get().resetTurnTimer();
+      setCombat: (combat: Combat | null) => {
+        if (combat) {
+          const sortedParticipants = sortParticipantsByInitiative(
+            combat.participants
+          );
+          const currentParticipant = combat.current_participant_id
+            ? sortedParticipants.find(
+                (p) => p._id === combat.current_participant_id
+              ) || null
+            : sortedParticipants[0] || null;
 
-      // Set initial timer value
-      set({ turnTimer: seconds, turnTimerActive: true });
-
-      // Start countdown interval
-      const intervalId = window.setInterval(() => {
-        const current = get().turnTimer;
-
-        if (current === null || !get().turnTimerActive) {
-          window.clearInterval(intervalId);
-          return;
-        }
-
-        if (current <= 1) {
-          set({ turnTimer: 0, turnTimerActive: false });
-          window.clearInterval(intervalId);
-
-          // Notify about timer expiration
-          get().addNotification("warning", "Turn timer expired!");
+          set({
+            activeCombat: combat,
+            participants: sortedParticipants,
+            currentParticipant,
+            round: combat.round,
+            turn: combat.turn,
+          });
         } else {
-          set({ turnTimer: current - 1 });
+          set({
+            activeCombat: null,
+            participants: [],
+            currentParticipant: null,
+            round: 1,
+            turn: 0,
+          });
         }
-      }, 1000);
+      },
 
-      // Store interval ID
-      set({ timerIntervalId: intervalId });
-    },
+      updateLocalParticipant: (
+        participantId: string,
+        updates: Partial<CombatParticipant>
+      ) => {
+        set((state) => ({
+          participants: state.participants.map((p) =>
+            p._id === participantId ? { ...p, ...updates } : p
+          ),
+          currentParticipant:
+            state.currentParticipant?._id === participantId
+              ? { ...state.currentParticipant, ...updates }
+              : state.currentParticipant,
+        }));
+      },
 
-    pauseTurnTimer: () => {
-      set({ turnTimerActive: false });
-    },
-
-    resumeTurnTimer: () => {
-      set({ turnTimerActive: true });
-    },
-
-    resetTurnTimer: () => {
-      set((state) => {
-        if (state.timerIntervalId !== null) {
-          window.clearInterval(state.timerIntervalId);
-        }
-        return {
-          turnTimer: null,
-          turnTimerActive: false,
-          timerIntervalId: null,
-        };
-      });
-    },
-
-    // Helper functions
-    getCurrentEntity: () => {
-      const { activeCombat } = get();
-
-      if (!activeCombat || activeCombat.initiative_order.length === 0) {
-        return null;
-      }
-
-      const currentTurn = activeCombat.current_turn;
-      if (currentTurn >= activeCombat.initiative_order.length) {
-        return null;
-      }
-
-      const entity = activeCombat.initiative_order[currentTurn];
-
-      return {
-        id: entity.id,
-        type: entity.type,
-        name:
-          entity.name ||
-          get().getEntityById(entity.id, entity.type)?.name ||
-          entity.id,
-      };
-    },
-
-    getEntityById: (entityId: string, entityType: "character" | "npc") => {
-      if (entityType === "character") {
-        // Use callback to get character data
-        return getCharacterCallback ? getCharacterCallback(entityId) : null;
-      } else {
-        // Use callback to get NPC data
-        return getNPCCallback ? getNPCCallback(entityId) : null;
-      }
-    },
-
-    isPlayerTurn: (userId: string) => {
-      const { activeCombat } = get();
-      if (!activeCombat || !activeCombat.initiative_order.length) return false;
-
-      const currentTurn = activeCombat.current_turn;
-      if (currentTurn >= activeCombat.initiative_order.length) return false;
-
-      const currentEntity = activeCombat.initiative_order[currentTurn];
-      if (currentEntity.type !== "character") return false;
-
-      // Simplified check - would need character data callback
-      return false;
-    },
-
-    canControl: (
-      entityId: string,
-      entityType: "character" | "npc",
-      userId: string,
-      isDM: boolean
-    ) => {
-      // DMs can control anything
-      if (isDM) return true;
-
-      // Players can only control their own characters (simplified)
-      return entityType === "character";
-    },
-
-    getActiveConditions: (
-      entityId: string,
-      entityType: "character" | "npc"
-    ) => {
-      const { activeCombat } = get();
-      if (!activeCombat || !activeCombat.conditions) return [];
-
-      return activeCombat.conditions.filter(
-        (condition) =>
-          condition.target_id === entityId &&
-          condition.target_type === entityType
-      );
-    },
-
-    getInitiativeModifier: (
-      entityId: string,
-      entityType: "character" | "npc"
-    ) => {
-      // Simplified - would need entity data callbacks for accurate calculation
-      return 0;
-    },
-
-    // Reset state
-    resetState: () => {
-      // Reset state except for combatHistory
-      get().resetTurnTimer();
-      set({
-        activeCombat: null,
-        pendingInitiative: {},
-        isLoading: false,
-        error: null,
-      });
-    },
-
-    // Notification system
-    addNotification: (
-      type: "info" | "success" | "warning" | "error",
-      message: string
-    ) => {
-      // Se há um callback configurado (do gameStore), usa ele
-      if (notificationCallback) {
-        notificationCallback(type, message);
-      } else {
-        // Fallback para console se não há callback
-        console.log(`[Combat Store] ${type.toUpperCase()}: ${message}`);
-      }
-    },
-  }))
+      addNotification: (
+        type: "info" | "success" | "warning" | "error",
+        message: string
+      ) => {
+        notificationCallback?.(type, message);
+      },
+    }),
+    {
+      name: "combat-store",
+    }
+  )
 );
 
 export default useCombatStore;

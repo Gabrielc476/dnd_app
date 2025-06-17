@@ -29,10 +29,13 @@ import { useAuth } from "@/hooks/useAuth";
 import { useGameStore } from "@/stores/gameStore";
 import { StoreProvider, initializeStores } from "@/stores";
 
-// CORREÇÃO: Sonner em vez de toaster antigo
-import { Toaster } from "@/components/ui/sonner";
+// CORREÇÃO: Error Boundary
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
-// CORREÇÃO: Theme provider criado
+// CORREÇÃO: Sonner em vez de toaster antigo
+import { Toaster } from "sonner";
+
+// CORREÇÃO: Theme provider corrigido
 import { ThemeProvider } from "@/components/theme-provider";
 
 // UI Components
@@ -107,7 +110,7 @@ const navigationItems = [
   },
 ];
 
-// ✅ AUTHGUARD CORRIGIDO
+// ✅ AUTHGUARD CORRIGIDO E COMPLETO
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { user, isLoading, isAuthenticated } = useAuth();
   const pathname = usePathname();
@@ -141,7 +144,7 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   }
 
   // Se está autenticado e está em página pública, redirecionar para dashboard
-  if (isAuthenticated && isPublicPage) {
+  if (isAuthenticated && isPublicPage && pathname !== "/") {
     router.push("/dashboard");
     return null;
   }
@@ -149,20 +152,33 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// ✅ MAIN LAYOUT CORRIGIDO
+// ✅ MAIN LAYOUT CORRIGIDO E COMPLETO
 function MainLayout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const { currentCampaign, isConnected } = useGameStore();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Não mostrar sidebar em páginas de auth
-  const authPages = ["/auth/login", "/auth/register", "/auth/forgot-password"];
+  // Não mostrar sidebar em páginas de auth e landing
+  const authPages = [
+    "/auth/login",
+    "/auth/register",
+    "/auth/forgot-password",
+    "/",
+  ];
   const isAuthPage = authPages.includes(pathname);
 
   if (isAuthPage) {
     return <>{children}</>;
   }
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch (error) {
+      console.error("Erro ao fazer logout:", error);
+    }
+  };
 
   return (
     <div className="flex h-screen bg-background">
@@ -178,23 +194,26 @@ function MainLayout({ children }: { children: React.ReactNode }) {
               {navigationItems.map((item) => (
                 <Button
                   key={item.href}
-                  variant={pathname === item.href ? "secondary" : "ghost"}
+                  variant={pathname === item.href ? "default" : "ghost"}
                   className="w-full justify-start"
                   onClick={() => (window.location.href = item.href)}
                 >
-                  <item.icon className="h-5 w-5 mr-3" />
+                  <item.icon className="mr-2 h-4 w-4" />
                   {item.title}
                 </Button>
               ))}
             </div>
           </ScrollArea>
 
-          <div className="p-4 border-t">
+          {/* User section */}
+          <div className="border-t p-4">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="w-full justify-start">
-                  <Avatar className="h-8 w-8 mr-3">
-                    <AvatarImage src={user?.avatar_url} />
+                  <Avatar className="mr-2 h-6 w-6">
+                    <AvatarImage
+                      src={`https://api.dicebear.com/7.x/initials/svg?seed=${user?.username}`}
+                    />
                     <AvatarFallback>
                       {user?.username?.charAt(0).toUpperCase() || "U"}
                     </AvatarFallback>
@@ -204,16 +223,16 @@ function MainLayout({ children }: { children: React.ReactNode }) {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuItem>
-                  <User className="h-4 w-4 mr-2" />
+                  <User className="mr-2 h-4 w-4" />
                   Profile
                 </DropdownMenuItem>
                 <DropdownMenuItem>
-                  <Settings className="h-4 w-4 mr-2" />
+                  <Settings className="mr-2 h-4 w-4" />
                   Settings
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={logout}>
-                  <LogOut className="h-4 w-4 mr-2" />
+                <DropdownMenuItem onClick={handleLogout}>
+                  <LogOut className="mr-2 h-4 w-4" />
                   Logout
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -224,89 +243,100 @@ function MainLayout({ children }: { children: React.ReactNode }) {
 
       {/* Mobile Sidebar */}
       <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-        <SheetContent side="left" className="p-0">
-          <div className="flex flex-col h-full">
-            <SheetHeader className="border-b p-4">
-              <SheetTitle>D&D VTT</SheetTitle>
-            </SheetHeader>
-            <ScrollArea className="flex-1 px-3">
-              <div className="space-y-1 py-4">
-                {navigationItems.map((item) => (
-                  <Button
-                    key={item.href}
-                    variant={pathname === item.href ? "secondary" : "ghost"}
-                    className="w-full justify-start"
-                    onClick={() => {
-                      window.location.href = item.href;
-                      setSidebarOpen(false);
-                    }}
-                  >
-                    <item.icon className="h-5 w-5 mr-3" />
-                    {item.title}
-                  </Button>
-                ))}
-              </div>
-            </ScrollArea>
-          </div>
+        <SheetTrigger asChild>
+          <Button
+            variant="outline"
+            size="icon"
+            className="md:hidden fixed top-4 left-4 z-50"
+          >
+            <Menu className="h-4 w-4" />
+          </Button>
+        </SheetTrigger>
+        <SheetContent side="left" className="w-64 p-0">
+          <SheetHeader className="border-b px-4 py-3">
+            <SheetTitle>D&D VTT</SheetTitle>
+          </SheetHeader>
+          <ScrollArea className="flex-1 px-3">
+            <div className="space-y-1 py-4">
+              {navigationItems.map((item) => (
+                <Button
+                  key={item.href}
+                  variant={pathname === item.href ? "default" : "ghost"}
+                  className="w-full justify-start"
+                  onClick={() => {
+                    window.location.href = item.href;
+                    setSidebarOpen(false);
+                  }}
+                >
+                  <item.icon className="mr-2 h-4 w-4" />
+                  {item.title}
+                </Button>
+              ))}
+            </div>
+          </ScrollArea>
         </SheetContent>
       </Sheet>
 
       {/* Main Content */}
       <div className="flex flex-col flex-1 overflow-hidden">
-        {/* Header */}
-        <header className="h-16 border-b bg-card flex items-center justify-between px-4">
-          <div className="flex items-center gap-4">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="md:hidden"
-              onClick={() => setSidebarOpen(true)}
-            >
-              <Menu className="h-5 w-5" />
-            </Button>
+        {/* Top Bar */}
+        <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className="flex h-16 items-center px-6">
+            <div className="ml-auto flex items-center space-x-4">
+              {/* Connection Status */}
+              <div className="flex items-center space-x-2">
+                {isConnected ? (
+                  <Badge variant="default" className="gap-1">
+                    <Wifi className="h-3 w-3" />
+                    Connected
+                  </Badge>
+                ) : (
+                  <Badge variant="destructive" className="gap-1">
+                    <WifiOff className="h-3 w-3" />
+                    Disconnected
+                  </Badge>
+                )}
+              </div>
 
-            {/* Connection Status */}
-            <Badge variant={isConnected ? "default" : "destructive"}>
-              {isConnected ? (
-                <>
-                  <Wifi className="h-3 w-3 mr-1" /> Connected
-                </>
-              ) : (
-                <>
-                  <WifiOff className="h-3 w-3 mr-1" /> Disconnected
-                </>
+              {/* Current Campaign */}
+              {currentCampaign && (
+                <div className="flex items-center space-x-2">
+                  <Badge variant="outline" className="gap-1">
+                    <CheckCircle className="h-3 w-3" />
+                    {currentCampaign.name}
+                  </Badge>
+                </div>
               )}
-            </Badge>
-          </div>
 
-          <div className="flex items-center gap-4">
-            {/* Current Campaign */}
-            {currentCampaign && (
-              <Badge variant="outline">
-                <Map className="h-3 w-3 mr-1" />
-                {currentCampaign.name}
-              </Badge>
-            )}
+              {/* Notifications */}
+              <Button variant="ghost" size="icon">
+                <Bell className="h-4 w-4" />
+              </Button>
 
-            {/* Notifications */}
-            <Button variant="ghost" size="icon">
-              <Bell className="h-5 w-5" />
-            </Button>
+              {/* User Avatar */}
+              <Avatar className="h-8 w-8">
+                <AvatarImage
+                  src={`https://api.dicebear.com/7.x/initials/svg?seed=${user?.username}`}
+                />
+                <AvatarFallback>
+                  {user?.username?.charAt(0).toUpperCase() || "U"}
+                </AvatarFallback>
+              </Avatar>
+            </div>
           </div>
         </header>
 
         {/* Campaign Selection Alert */}
-        {!currentCampaign && pathname !== "/campaign" && (
-          <Alert className="m-4">
-            <AlertCircle className="h-4 w-4" />
+        {!currentCampaign && (
+          <Alert className="m-6 mb-0">
             <AlertDescription>
-              No campaign selected.{" "}
+              Please{" "}
               <Button
                 variant="link"
                 className="p-0 h-auto"
                 onClick={() => (window.location.href = "/campaign")}
               >
-                Select or create a campaign
+                select or create a campaign
               </Button>{" "}
               to access all features.
             </AlertDescription>
@@ -322,7 +352,7 @@ function MainLayout({ children }: { children: React.ReactNode }) {
   );
 }
 
-// ✅ ROOT LAYOUT CORRIGIDO
+// ✅ ROOT LAYOUT CORRIGIDO E COMPLETO
 export default function RootLayout({
   children,
 }: {
@@ -354,20 +384,22 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
-          <StoreProvider>
-            <AuthGuard>
-              <MainLayout>{children}</MainLayout>
-            </AuthGuard>
-            {/* CORREÇÃO: Sonner Toaster */}
-            <Toaster position="top-right" />
-          </StoreProvider>
-        </ThemeProvider>
+        <ErrorBoundary>
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="system"
+            enableSystem
+            disableTransitionOnChange
+          >
+            <StoreProvider>
+              <AuthGuard>
+                <MainLayout>{children}</MainLayout>
+              </AuthGuard>
+              {/* CORREÇÃO: Sonner Toaster */}
+              <Toaster position="top-right" richColors />
+            </StoreProvider>
+          </ThemeProvider>
+        </ErrorBoundary>
       </body>
     </html>
   );

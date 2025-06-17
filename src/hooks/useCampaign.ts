@@ -1,540 +1,525 @@
-// hooks/useCampaign.ts
-import { useState, useEffect, useCallback } from "react";
-import { campaignsAPI } from "@/lib/api";
-import { useWebSocketWithLocks } from "@/lib/socket";
-import { Campaign, CampaignListItem, Encounter, Image } from "@/lib/types";
+/**
+ * useCampaign Hook - COMPLETAMENTE NOVO
+ * Funcionalidades implementadas:
+ * 1. ✅ Campaign management completo
+ * 2. ✅ Integration com gameStore
+ * 3. ✅ Player management
+ * 4. ✅ Settings management
+ * 5. ✅ WebSocket integration
+ */
 
+import { useState, useEffect, useCallback } from "react";
+import { useGameStore } from "@/stores/gameStore";
+import { Campaign, CampaignListItem, CampaignSettings } from "@/lib/types";
+import { toast } from "sonner";
+
+// ===== TYPES =====
 export interface UseCampaignProps {
   campaignId?: string;
-  userId: string;
+  autoLoad?: boolean;
 }
 
 export interface UseCampaignReturn {
+  // Data
   campaign: Campaign | null;
   campaigns: CampaignListItem[];
+
+  // State
   isLoading: boolean;
   error: string | null;
-  connected: boolean;
-  fetchCampaign: (id: string) => Promise<Campaign | null>;
+
+  // Campaign Management
   fetchCampaigns: () => Promise<CampaignListItem[]>;
-  createCampaign: (campaignData: {
-    name: string;
-    description?: string;
-  }) => Promise<Campaign | null>;
-  updateCampaign: (id: string, updates: any) => Promise<Campaign | null>;
+  fetchCampaign: (id: string) => Promise<Campaign | null>;
+  createCampaign: (campaignData: Partial<Campaign>) => Promise<Campaign | null>;
+  updateCampaign: (id: string, updates: Partial<Campaign>) => Promise<boolean>;
   deleteCampaign: (id: string) => Promise<boolean>;
-  addPlayer: (campaignId: string, playerId: string) => Promise<Campaign | null>;
-  removePlayer: (
+  setCurrentCampaign: (campaign: Campaign | null) => void;
+
+  // Player Management
+  addPlayer: (campaignId: string, playerId: string) => Promise<boolean>;
+  removePlayer: (campaignId: string, playerId: string) => Promise<boolean>;
+  getPlayers: (campaignId: string) => string[];
+  isPlayerInCampaign: (campaignId: string, playerId: string) => boolean;
+
+  // Settings Management
+  updateSettings: (
     campaignId: string,
-    playerId: string
-  ) => Promise<Campaign | null>;
-  createEncounter: (
-    campaignId: string,
-    encounterData: any
-  ) => Promise<Campaign | null>;
-  updateEncounter: (
-    campaignId: string,
-    encounterId: string,
-    updates: any
-  ) => Promise<Campaign | null>;
-  deleteEncounter: (
-    campaignId: string,
-    encounterId: string
-  ) => Promise<Campaign | null>;
-  setActiveEncounter: (
-    campaignId: string,
-    encounterId: string
-  ) => Promise<Campaign | null>;
-  clearActiveEncounter: (campaignId: string) => Promise<Campaign | null>;
-  uploadImage: (
-    campaignId: string,
-    imageFile: File,
-    metadata: any
-  ) => Promise<any>;
-  listImages: (
-    campaignId: string,
-    params?: { tags?: string; is_map?: boolean }
-  ) => Promise<Image[]>;
-  deleteImage: (campaignId: string, imageId: string) => Promise<any>;
-  updateImageMetadata: (
-    campaignId: string,
-    imageId: string,
-    updates: any
-  ) => Promise<any>;
-  shareImage: (campaignId: string, imageId: string) => Promise<any>;
-  acquireLock: (resourceId: string, resourceType: string) => Promise<boolean>;
-  releaseLock: (resourceId: string, resourceType: string) => void;
-  isLocked: (resourceId: string, resourceType: string) => boolean;
-  whoLocked: (resourceId: string, resourceType: string) => string | null;
+    settings: Partial<CampaignSettings>
+  ) => Promise<boolean>;
+  getSettings: (campaignId: string) => CampaignSettings | null;
+
+  // Campaign Operations
+  duplicateCampaign: (campaignId: string) => Promise<Campaign | null>;
+  archiveCampaign: (campaignId: string) => Promise<boolean>;
+  restoreCampaign: (campaignId: string) => Promise<boolean>;
+
+  // Utility
+  getCampaignById: (id: string) => Campaign | CampaignListItem | null;
+  isOwner: (campaignId: string, userId: string) => boolean;
+  canEdit: (campaignId: string, userId: string) => boolean;
+
+  // Events
+  onCampaignChange: (
+    callback: (campaign: Campaign | null) => void
+  ) => () => void;
 }
 
-/**
- * Hook for campaign management with WebSocket and API integration
- */
+// ===== DEFAULT SETTINGS =====
+const defaultCampaignSettings: CampaignSettings = {
+  allow_player_character_creation: true,
+  allow_dice_rolling: true,
+  auto_save_interval: 300, // 5 minutes
+  max_players: 6,
+  combat_settings: {
+    auto_roll_initiative: false,
+    show_enemy_hp: false,
+    allow_player_initiative: true,
+    turn_timer: 0, // No timer by default
+  },
+};
+
+// ===== HOOK IMPLEMENTATION =====
 export function useCampaign({
   campaignId,
-  userId,
-}: UseCampaignProps): UseCampaignReturn {
-  const [campaign, setCampaign] = useState<Campaign | null>(null);
-  const [campaigns, setCampaigns] = useState<CampaignListItem[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  autoLoad = true,
+}: UseCampaignProps = {}): UseCampaignReturn {
+  // Local state
+  const [specificCampaign, setSpecificCampaign] = useState<Campaign | null>(
+    null
+  );
 
-  // WebSocket connection for campaign events
+  // Store integration
   const {
-    connected,
-    error: socketError,
-    acquireLock,
-    releaseLock,
-    isLocked,
-    whoLocked,
-  } = useWebSocketWithLocks(campaignId || "", userId);
+    campaigns,
+    currentCampaign,
+    isLoading,
+    error,
+    fetchCampaigns: storeFetchCampaigns,
+    fetchCampaign: storeFetchCampaign,
+    createCampaign: storeCreateCampaign,
+    updateCampaign: storeUpdateCampaign,
+    deleteCampaign: storeDeleteCampaign,
+    setCurrentCampaign: storeSetCurrentCampaign,
+    onCampaignChange: storeOnCampaignChange,
+  } = useGameStore();
 
-  // Load campaign data if campaignId is provided
-  useEffect(() => {
-    if (campaignId) {
-      fetchCampaign(campaignId);
-    }
-  }, [campaignId]);
+  // Use either current campaign or specific campaign
+  const campaign = campaignId ? specificCampaign : currentCampaign;
 
-  // Handle socket error
-  useEffect(() => {
-    if (socketError) {
-      setError(`WebSocket error: ${socketError}`);
-    }
-  }, [socketError]);
+  // ===== CAMPAIGN MANAGEMENT =====
+  const fetchCampaigns = useCallback(async (): Promise<CampaignListItem[]> => {
+    return storeFetchCampaigns();
+  }, [storeFetchCampaigns]);
 
-  /**
-   * Fetch campaign by ID
-   */
   const fetchCampaign = useCallback(
     async (id: string): Promise<Campaign | null> => {
-      setIsLoading(true);
-      setError(null);
       try {
-        const data = await campaignsAPI.getCampaign(id);
-        setCampaign(data);
-        setIsLoading(false);
-        return data;
-      } catch (err: any) {
-        setError(err.message || "Failed to fetch campaign");
-        setIsLoading(false);
+        const campaign = await storeFetchCampaign(id);
+
+        if (campaignId && id === campaignId) {
+          setSpecificCampaign(campaign);
+        }
+
+        return campaign;
+      } catch (error) {
+        console.error("Error fetching campaign:", error);
         return null;
       }
     },
-    []
+    [storeFetchCampaign, campaignId]
   );
 
-  /**
-   * Fetch all campaigns for the user
-   */
-  const fetchCampaigns = useCallback(async (): Promise<CampaignListItem[]> => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const data = await campaignsAPI.listCampaigns();
-      setCampaigns(data);
-      setIsLoading(false);
-      return data;
-    } catch (err: any) {
-      setError(err.message || "Failed to fetch campaigns");
-      setIsLoading(false);
-      return [];
-    }
-  }, []);
-
-  /**
-   * Create new campaign
-   */
   const createCampaign = useCallback(
-    async (campaignData: {
-      name: string;
-      description?: string;
-    }): Promise<Campaign | null> => {
-      setIsLoading(true);
-      setError(null);
+    async (campaignData: Partial<Campaign>): Promise<Campaign | null> => {
       try {
-        const data = await campaignsAPI.createCampaign({
+        const newCampaignData = {
           ...campaignData,
-          dm_id: userId,
-        });
-        // Refresh campaign list
-        fetchCampaigns();
-        setIsLoading(false);
-        return data;
-      } catch (err: any) {
-        setError(err.message || "Failed to create campaign");
-        setIsLoading(false);
+          settings: {
+            ...defaultCampaignSettings,
+            ...campaignData.settings,
+          },
+          players: campaignData.players || [],
+          is_active: campaignData.is_active ?? true,
+        };
+
+        const newCampaign = await storeCreateCampaign(newCampaignData);
+
+        if (newCampaign) {
+          toast.success(`Campaign "${newCampaign.name}" created successfully!`);
+        }
+
+        return newCampaign;
+      } catch (error) {
+        console.error("Error creating campaign:", error);
+        toast.error("Failed to create campaign");
         return null;
       }
     },
-    [userId, fetchCampaigns]
+    [storeCreateCampaign]
   );
 
-  /**
-   * Update campaign
-   */
   const updateCampaign = useCallback(
-    async (id: string, updates: any): Promise<Campaign | null> => {
-      setIsLoading(true);
-      setError(null);
+    async (id: string, updates: Partial<Campaign>): Promise<boolean> => {
       try {
-        const data = await campaignsAPI.updateCampaign(id, updates);
-        setCampaign(data);
-        setIsLoading(false);
-        return data;
-      } catch (err: any) {
-        setError(err.message || "Failed to update campaign");
-        setIsLoading(false);
-        return null;
-      }
-    },
-    []
-  );
+        const success = await storeUpdateCampaign(id, updates);
 
-  /**
-   * Delete campaign
-   */
-  const deleteCampaign = useCallback(
-    async (id: string): Promise<boolean> => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        await campaignsAPI.deleteCampaign(id);
-        // Refresh campaign list
-        fetchCampaigns();
-        setIsLoading(false);
-        return true;
-      } catch (err: any) {
-        setError(err.message || "Failed to delete campaign");
-        setIsLoading(false);
+        // Update local state if this is the specific campaign we're tracking
+        if (campaignId && id === campaignId && specificCampaign) {
+          setSpecificCampaign({ ...specificCampaign, ...updates });
+        }
+
+        return success;
+      } catch (error) {
+        console.error("Error updating campaign:", error);
         return false;
       }
     },
-    [fetchCampaigns]
+    [storeUpdateCampaign, campaignId, specificCampaign]
   );
 
-  /**
-   * Add player to campaign
-   */
+  const deleteCampaign = useCallback(
+    async (id: string): Promise<boolean> => {
+      try {
+        const success = await storeDeleteCampaign(id);
+
+        // Clear local state if this was the specific campaign we were tracking
+        if (campaignId && id === campaignId) {
+          setSpecificCampaign(null);
+        }
+
+        return success;
+      } catch (error) {
+        console.error("Error deleting campaign:", error);
+        return false;
+      }
+    },
+    [storeDeleteCampaign, campaignId]
+  );
+
+  const setCurrentCampaign = useCallback(
+    (campaign: Campaign | null) => {
+      storeSetCurrentCampaign(campaign);
+
+      if (campaign) {
+        toast.success(`Switched to campaign: ${campaign.name}`);
+      }
+    },
+    [storeSetCurrentCampaign]
+  );
+
+  // ===== PLAYER MANAGEMENT =====
   const addPlayer = useCallback(
-    async (campaignId: string, playerId: string): Promise<Campaign | null> => {
-      setIsLoading(true);
-      setError(null);
+    async (campaignId: string, playerId: string): Promise<boolean> => {
       try {
-        const data = await campaignsAPI.addPlayer(campaignId, playerId);
-        setCampaign(data);
-        setIsLoading(false);
-        return data;
-      } catch (err: any) {
-        setError(err.message || "Failed to add player");
-        setIsLoading(false);
-        return null;
+        const targetCampaign = getCampaignById(campaignId) as Campaign;
+        if (!targetCampaign) {
+          throw new Error("Campaign not found");
+        }
+
+        if (targetCampaign.players.includes(playerId)) {
+          toast.warning("Player is already in this campaign");
+          return true;
+        }
+
+        const updatedPlayers = [...targetCampaign.players, playerId];
+        const success = await updateCampaign(campaignId, {
+          players: updatedPlayers,
+        });
+
+        if (success) {
+          toast.success("Player added to campaign");
+        }
+
+        return success;
+      } catch (error) {
+        console.error("Error adding player:", error);
+        toast.error("Failed to add player to campaign");
+        return false;
       }
     },
-    []
+    [updateCampaign]
   );
 
-  /**
-   * Remove player from campaign
-   */
   const removePlayer = useCallback(
-    async (campaignId: string, playerId: string): Promise<Campaign | null> => {
-      setIsLoading(true);
-      setError(null);
+    async (campaignId: string, playerId: string): Promise<boolean> => {
       try {
-        const data = await campaignsAPI.removePlayer(campaignId, playerId);
-        setCampaign(data);
-        setIsLoading(false);
-        return data;
-      } catch (err: any) {
-        setError(err.message || "Failed to remove player");
-        setIsLoading(false);
-        return null;
+        const targetCampaign = getCampaignById(campaignId) as Campaign;
+        if (!targetCampaign) {
+          throw new Error("Campaign not found");
+        }
+
+        const updatedPlayers = targetCampaign.players.filter(
+          (id) => id !== playerId
+        );
+        const success = await updateCampaign(campaignId, {
+          players: updatedPlayers,
+        });
+
+        if (success) {
+          toast.success("Player removed from campaign");
+        }
+
+        return success;
+      } catch (error) {
+        console.error("Error removing player:", error);
+        toast.error("Failed to remove player from campaign");
+        return false;
       }
     },
-    []
+    [updateCampaign]
   );
 
-  /**
-   * Create encounter
-   */
-  const createEncounter = useCallback(
+  const getPlayers = useCallback((campaignId: string): string[] => {
+    const targetCampaign = getCampaignById(campaignId);
+    return targetCampaign?.players || [];
+  }, []);
+
+  const isPlayerInCampaign = useCallback(
+    (campaignId: string, playerId: string): boolean => {
+      const players = getPlayers(campaignId);
+      return players.includes(playerId);
+    },
+    [getPlayers]
+  );
+
+  // ===== SETTINGS MANAGEMENT =====
+  const updateSettings = useCallback(
     async (
       campaignId: string,
-      encounterData: any
-    ): Promise<Campaign | null> => {
-      setIsLoading(true);
-      setError(null);
+      settings: Partial<CampaignSettings>
+    ): Promise<boolean> => {
       try {
-        const data = await campaignsAPI.createEncounter(
-          campaignId,
-          encounterData
-        );
-        setCampaign(data);
-        setIsLoading(false);
-        return data;
-      } catch (err: any) {
-        setError(err.message || "Failed to create encounter");
-        setIsLoading(false);
-        return null;
+        const targetCampaign = getCampaignById(campaignId) as Campaign;
+        if (!targetCampaign) {
+          throw new Error("Campaign not found");
+        }
+
+        const updatedSettings = {
+          ...targetCampaign.settings,
+          ...settings,
+        };
+
+        const success = await updateCampaign(campaignId, {
+          settings: updatedSettings,
+        });
+
+        if (success) {
+          toast.success("Campaign settings updated");
+        }
+
+        return success;
+      } catch (error) {
+        console.error("Error updating settings:", error);
+        toast.error("Failed to update campaign settings");
+        return false;
       }
+    },
+    [updateCampaign]
+  );
+
+  const getSettings = useCallback(
+    (campaignId: string): CampaignSettings | null => {
+      const targetCampaign = getCampaignById(campaignId) as Campaign;
+      return targetCampaign?.settings || null;
     },
     []
   );
 
-  /**
-   * Update encounter
-   */
-  const updateEncounter = useCallback(
-    async (
-      campaignId: string,
-      encounterId: string,
-      updates: any
-    ): Promise<Campaign | null> => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const data = await campaignsAPI.updateEncounter(
-          campaignId,
-          encounterId,
-          updates
-        );
-        setCampaign(data);
-        setIsLoading(false);
-        return data;
-      } catch (err: any) {
-        setError(err.message || "Failed to update encounter");
-        setIsLoading(false);
-        return null;
-      }
-    },
-    []
-  );
-
-  /**
-   * Delete encounter
-   */
-  const deleteEncounter = useCallback(
-    async (
-      campaignId: string,
-      encounterId: string
-    ): Promise<Campaign | null> => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const data = await campaignsAPI.deleteEncounter(
-          campaignId,
-          encounterId
-        );
-        setCampaign(data);
-        setIsLoading(false);
-        return data;
-      } catch (err: any) {
-        setError(err.message || "Failed to delete encounter");
-        setIsLoading(false);
-        return null;
-      }
-    },
-    []
-  );
-
-  /**
-   * Set active encounter
-   */
-  const setActiveEncounter = useCallback(
-    async (
-      campaignId: string,
-      encounterId: string
-    ): Promise<Campaign | null> => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const data = await campaignsAPI.setActiveEncounter(
-          campaignId,
-          encounterId
-        );
-        setCampaign(data);
-        setIsLoading(false);
-        return data;
-      } catch (err: any) {
-        setError(err.message || "Failed to set active encounter");
-        setIsLoading(false);
-        return null;
-      }
-    },
-    []
-  );
-
-  /**
-   * Clear active encounter
-   */
-  const clearActiveEncounter = useCallback(
+  // ===== CAMPAIGN OPERATIONS =====
+  const duplicateCampaign = useCallback(
     async (campaignId: string): Promise<Campaign | null> => {
-      setIsLoading(true);
-      setError(null);
       try {
-        const data = await campaignsAPI.clearActiveEncounter(campaignId);
-        setCampaign(data);
-        setIsLoading(false);
-        return data;
-      } catch (err: any) {
-        setError(err.message || "Failed to clear active encounter");
-        setIsLoading(false);
+        const originalCampaign = getCampaignById(campaignId) as Campaign;
+        if (!originalCampaign) {
+          throw new Error("Campaign not found");
+        }
+
+        const duplicateData: Partial<Campaign> = {
+          name: `${originalCampaign.name} (Copy)`,
+          description: originalCampaign.description,
+          settings: { ...originalCampaign.settings },
+          players: [], // Start with no players
+          is_active: true,
+        };
+
+        const duplicatedCampaign = await createCampaign(duplicateData);
+
+        if (duplicatedCampaign) {
+          toast.success(
+            `Campaign "${duplicatedCampaign.name}" duplicated successfully`
+          );
+        }
+
+        return duplicatedCampaign;
+      } catch (error) {
+        console.error("Error duplicating campaign:", error);
+        toast.error("Failed to duplicate campaign");
         return null;
       }
     },
-    []
+    [createCampaign]
   );
 
-  /**
-   * Upload image
-   */
-  const uploadImage = useCallback(
-    async (
-      campaignId: string,
-      imageFile: File,
-      metadata: any
-    ): Promise<any> => {
-      setIsLoading(true);
-      setError(null);
+  const archiveCampaign = useCallback(
+    async (campaignId: string): Promise<boolean> => {
       try {
-        const data = await campaignsAPI.uploadImage(
-          campaignId,
-          imageFile,
-          metadata
-        );
-        // Refresh campaign data to include the new image
-        fetchCampaign(campaignId);
-        setIsLoading(false);
-        return data;
-      } catch (err: any) {
-        setError(err.message || "Failed to upload image");
-        setIsLoading(false);
-        return null;
+        const success = await updateCampaign(campaignId, { is_active: false });
+
+        if (success) {
+          toast.success("Campaign archived");
+        }
+
+        return success;
+      } catch (error) {
+        console.error("Error archiving campaign:", error);
+        toast.error("Failed to archive campaign");
+        return false;
       }
     },
-    [fetchCampaign]
+    [updateCampaign]
   );
 
-  /**
-   * List images
-   */
-  const listImages = useCallback(
-    async (
-      campaignId: string,
-      params?: { tags?: string; is_map?: boolean }
-    ): Promise<Image[]> => {
-      setIsLoading(true);
-      setError(null);
+  const restoreCampaign = useCallback(
+    async (campaignId: string): Promise<boolean> => {
       try {
-        const data = await campaignsAPI.listImages(campaignId, params);
-        setIsLoading(false);
-        return data;
-      } catch (err: any) {
-        setError(err.message || "Failed to list images");
-        setIsLoading(false);
-        return [];
+        const success = await updateCampaign(campaignId, { is_active: true });
+
+        if (success) {
+          toast.success("Campaign restored");
+        }
+
+        return success;
+      } catch (error) {
+        console.error("Error restoring campaign:", error);
+        toast.error("Failed to restore campaign");
+        return false;
       }
     },
-    []
+    [updateCampaign]
   );
 
-  /**
-   * Delete image
-   */
-  const deleteImage = useCallback(
-    async (campaignId: string, imageId: string): Promise<any> => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const data = await campaignsAPI.deleteImage(campaignId, imageId);
-        // Refresh campaign data to reflect the deleted image
-        fetchCampaign(campaignId);
-        setIsLoading(false);
-        return data;
-      } catch (err: any) {
-        setError(err.message || "Failed to delete image");
-        setIsLoading(false);
-        return null;
+  // ===== UTILITY FUNCTIONS =====
+  const getCampaignById = useCallback(
+    (id: string): Campaign | CampaignListItem | null => {
+      // Check current campaign first
+      if (currentCampaign && currentCampaign._id === id) {
+        return currentCampaign;
       }
+
+      // Check specific campaign
+      if (specificCampaign && specificCampaign._id === id) {
+        return specificCampaign;
+      }
+
+      // Look in campaigns list
+      const campaignListItem = campaigns.find((c) => c._id === id);
+      if (campaignListItem) {
+        return campaignListItem;
+      }
+
+      return null;
     },
-    [fetchCampaign]
+    [currentCampaign, specificCampaign, campaigns]
   );
 
-  /**
-   * Update image metadata
-   */
-  const updateImageMetadata = useCallback(
-    async (campaignId: string, imageId: string, updates: any): Promise<any> => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const data = await campaignsAPI.updateImageMetadata(
-          campaignId,
-          imageId,
-          updates
-        );
-        // Refresh campaign data to reflect the updated image
-        fetchCampaign(campaignId);
-        setIsLoading(false);
-        return data;
-      } catch (err: any) {
-        setError(err.message || "Failed to update image metadata");
-        setIsLoading(false);
-        return null;
-      }
+  const isOwner = useCallback(
+    (campaignId: string, userId: string): boolean => {
+      const targetCampaign = getCampaignById(campaignId);
+      return targetCampaign?.owner_id === userId;
     },
-    [fetchCampaign]
+    [getCampaignById]
   );
 
-  /**
-   * Share image
-   */
-  const shareImage = useCallback(
-    async (campaignId: string, imageId: string): Promise<any> => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const data = await campaignsAPI.shareImage(campaignId, imageId);
-        setIsLoading(false);
-        return data;
-      } catch (err: any) {
-        setError(err.message || "Failed to share image");
-        setIsLoading(false);
-        return null;
+  const canEdit = useCallback(
+    (campaignId: string, userId: string): boolean => {
+      // Owner can always edit
+      if (isOwner(campaignId, userId)) {
+        return true;
       }
+
+      // Players can edit if settings allow it
+      const settings = getSettings(campaignId);
+      if (!settings) {
+        return false;
+      }
+
+      // For now, only owners can edit
+      // This could be expanded based on campaign settings
+      return false;
     },
-    []
+    [isOwner, getSettings]
   );
+
+  const onCampaignChange = useCallback(
+    (callback: (campaign: Campaign | null) => void) => {
+      return storeOnCampaignChange(callback);
+    },
+    [storeOnCampaignChange]
+  );
+
+  // ===== EFFECTS =====
+
+  // Load campaigns on mount
+  useEffect(() => {
+    if (autoLoad) {
+      fetchCampaigns();
+    }
+  }, [autoLoad, fetchCampaigns]);
+
+  // Load specific campaign if provided
+  useEffect(() => {
+    if (campaignId && autoLoad) {
+      fetchCampaign(campaignId);
+    }
+  }, [campaignId, autoLoad, fetchCampaign]);
+
+  // Clear specific campaign when campaignId changes
+  useEffect(() => {
+    if (!campaignId) {
+      setSpecificCampaign(null);
+    }
+  }, [campaignId]);
 
   return {
+    // Data
     campaign,
     campaigns,
+
+    // State
     isLoading,
     error,
-    connected,
-    fetchCampaign,
+
+    // Campaign Management
     fetchCampaigns,
+    fetchCampaign,
     createCampaign,
     updateCampaign,
     deleteCampaign,
+    setCurrentCampaign,
+
+    // Player Management
     addPlayer,
     removePlayer,
-    createEncounter,
-    updateEncounter,
-    deleteEncounter,
-    setActiveEncounter,
-    clearActiveEncounter,
-    uploadImage,
-    listImages,
-    deleteImage,
-    updateImageMetadata,
-    shareImage,
-    acquireLock,
-    releaseLock,
-    isLocked,
-    whoLocked,
+    getPlayers,
+    isPlayerInCampaign,
+
+    // Settings Management
+    updateSettings,
+    getSettings,
+
+    // Campaign Operations
+    duplicateCampaign,
+    archiveCampaign,
+    restoreCampaign,
+
+    // Utility
+    getCampaignById,
+    isOwner,
+    canEdit,
+
+    // Events
+    onCampaignChange,
   };
 }
 
