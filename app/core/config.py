@@ -126,12 +126,47 @@ class Settings(BaseSettings):
 
     @validator("ALLOWED_ORIGINS", pre=True)
     def assemble_cors_origins(cls, v: Any) -> List[str]:
-        """Converte string separada por vírgula em lista."""
-        if isinstance(v, str) and not v.startswith("["):
-            return [i.strip() for i in v.split(",")]
-        elif isinstance(v, (list, str)):
-            return v
-        raise ValueError(v)
+        """Converte string separada por vírgula em lista - CORRIGIDO."""
+        # Se é None ou vazio, retorna lista vazia
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return []
+
+        # Se já é uma lista, apenas limpa e retorna
+        if isinstance(v, list):
+            return [str(item).strip() for item in v if str(item).strip()]
+
+        # Se é string, processa
+        if isinstance(v, str):
+            # Se parece com uma lista JSON, tenta fazer parse
+            if v.strip().startswith('[') and v.strip().endswith(']'):
+                try:
+                    import ast
+                    parsed = ast.literal_eval(v)
+                    if isinstance(parsed, list):
+                        return [str(item).strip() for item in parsed if str(item).strip()]
+                except (ValueError, SyntaxError):
+                    pass
+
+            # Trata como string separada por vírgula
+            origins = [item.strip() for item in v.split(',') if item.strip()]
+            if origins:
+                return origins
+            # Se a string não produziu resultados válidos, retorna padrão
+            return ["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000"]
+
+        # Para qualquer outro tipo, tenta converter para string e processar
+        try:
+            str_value = str(v).strip()
+            if str_value and str_value.lower() != 'none':
+                origins = [item.strip() for item in str_value.split(',') if item.strip()]
+                if origins:
+                    return origins
+        except Exception:
+            pass
+
+        # Fallback seguro - retorna origens padrão para desenvolvimento
+        print(f"⚠️  Valor inválido para ALLOWED_ORIGINS: {v} (tipo: {type(v)}). Usando valores padrão.")
+        return ["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000"]
 
     @validator("SECRET_KEY")
     def validate_secret_key(cls, v: str) -> str:
@@ -340,6 +375,7 @@ try:
     print(f"🌍 Ambiente: {settings.ENVIRONMENT}")
     print(f"🔐 SECRET_KEY: {'✓' if len(settings.SECRET_KEY) >= 32 else '✗'}")
     print(f"🗄️  MongoDB: {settings.MONGODB_URI}")
+    print(f"🌐 ALLOWED_ORIGINS: {settings.ALLOWED_ORIGINS}")
 except Exception as e:
     print(f"❌ Erro ao carregar configurações: {e}")
     print("🔧 Verifique o arquivo .env ou execute o script generate_secret.py")
